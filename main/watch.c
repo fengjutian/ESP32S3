@@ -374,17 +374,16 @@ static void watch_task(void *arg)
             }
         }
 
-        if (s_face == FACE_INFO) {
-            render_tick(&now, false, false);
-        } else if (now.second != last_second) {
-            render_tick(&now, now.minute != last_minute, now.day != last_day);
-        } else if (now.minute != last_minute || now.day != last_day) {
-            render_tick(&now, now.minute != last_minute, now.day != last_day);
-        }
+        const bool sec_changed = (now.second != last_second);
+        const bool min_changed = (now.minute != last_minute);
+        const bool day_changed = (now.day != last_day);
 
-        if (now.second != last_second) last_second = now.second;
-        if (now.minute != last_minute) last_minute = now.minute;
-        if (now.day != last_day) last_day = now.day;
+        if (sec_changed || min_changed || day_changed) {
+            render_tick(&now, min_changed, day_changed);
+            last_second = now.second;
+            last_minute = now.minute;
+            last_day = now.day;
+        }
 
         /* 触摸：按下沿记录起点，抬起时判断滑动或点击 */
         pressed_now = touch_read(&pt);

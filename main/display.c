@@ -1,8 +1,8 @@
 /*
  * 极简 ST77916 (QSPI) 文本显示实现。
  *
- * 依赖 espressif/esp_lcd_st77916 组件 + 内置 8x16 字模，
- * 不依赖 LVGL。
+ * 初始化流程照抄 Waveshare 官方 BSP（读 0x04 判定屏幕版本 → 选初始化序列），
+ * 文本绘制用内置 8x16 点阵字模，不依赖 LVGL。
  *
  * SPDX-License-Identifier: CC0-1.0
  */
@@ -30,9 +30,11 @@
 
 static const char *TAG = "display";
 
-/* 每次 DMA 传输的行数，只是为了让缓冲区小一点 */
+/* 每次 DMA 传输的行数 */
 #define LINE_CHUNK          16
 #define FLUSH_TIMEOUT_MS    2000
+
+#define LCD_OPCODE_READ_CMD  (0x0B)
 
 static esp_lcd_panel_io_handle_t s_io;
 static esp_lcd_panel_handle_t s_panel;
@@ -48,7 +50,6 @@ static bool on_color_trans_done(esp_lcd_panel_io_handle_t io,
     return high_task_woken == pdTRUE;
 }
 
-/* 等一次 DMA 传输真正结束，避免缓冲区被提前改写 */
 static void wait_flush(void)
 {
     if (s_flush_done) {
@@ -63,14 +64,68 @@ static void push_bitmap(int x0, int y0, int x1, int y1, const void *buf)
     wait_flush();
 }
 
+/* 按寄存器 0x04 的值选初始化序列，和厂商 BSP 的规则一致 */
+static void select_init_sequence(const uint8_t id[4], bool id_valid,
+                                 const st77916_lcd_init_cmd_t **cmds,
+                                 uint16_t *count, const char **name)
+{
+#if (LCD_INIT_VERSION == 1)
+    *cmds = waveshare_185b_init_v1;
+    *count = sizeof(waveshare_185b_init_v1) / sizeof(waveshare_185b_init_v1[0]);
+    *name = "v1 (forced)";
+#elif (LCD_INIT_VERSION == 2)
+    *cmds = waveshare_185b_init_v2;
+    *count = sizeof(waveshare_185b_init_v2) / sizeof(waveshare_185b_init_v2[0]);
+    *name = "v2 (forced)";
+#else
+    if (id_valid && id[0] == 0x00 && id[1] == 0x02 && id[2] == 0x7F && id[3] == 0x7F) {
+        *cmds = waveshare_185b_init_v2;
+        *count = sizeof(waveshare_185b_init_v2) / sizeof(waveshare_185b_init_v2[0]);
+        *name = "v2";
+    } else {
+        *cmds = waveshare_185b_init_v1;
+        *count = sizeof(waveshare_185b_init_v1) / sizeof(waveshare_185b_init_v1[0]);
+        *name = id_valid ? "v1" : "v1 (id read failed)";
+    }
+#endif
+}
+
 esp_err_t display_init(void)
 {
-    /* QSPI 四条数据线 */
+    /* 1. 硬复位（厂商 BSP 在初始化总线之前先拉一次） */
+#if (LCD_PIN_RST >= 0)
+    gpio_config_t rst_cfg = {
+        .pin_bit_mask = 1ULL << LCD_PIN_RST,
+        .mode = GPIO_MODE_OUTPUT,
+    };
+    gpio_config(&rst_cfg);
+    gpio_set_level(LCD_PIN_RST, 0);
+    vTaskDelay(pdMS_TO_TICKS(10));
+    gpio_set_level(LCD_PIN_RST, 1);
+    vTaskDelay(pdMS_TO_TICKS(10));
+#endif
+
+    /* 2. QSPI 总线 */
+    const spi_bus_config_t bus_cfg = {
+        .data0_io_num = LCD_PIN_D0,
+        .data1_io_num = LCD_PIN_D1,
+        .data2_io_num = LCD_PIN_D2,
+        .data3_io_num = LCD_PIN_D3,
+        .sclk_io_num = LCD_PIN_PCLK,
+        .max_transfer_sz = LCD_H_RES * LINE_CHUNK * sizeof(uint16_t),
+        .flags = SPICOMMON_BUSFLAG_QUAD,
+    };
+    ESP_RETURN_ON_ERROR(spi_bus_initialize(LCD_SPI_HOST, &bus_cfg, SPI_DMA_CH_AUTO),
+                        TAG, "spi_bus_initialize failed");
+
+    s_flush_done = xSemaphoreCreateBinary();
+    ESP_RETURN_ON_FALSE(s_flush_done, ESP_ERR_NO_MEM, TAG, "no memory for semaphore");
+
     esp_lcd_panel_io_spi_config_t io_cfg = {
         .cs_gpio_num = LCD_PIN_CS,
         .dc_gpio_num = -1,                 /* QSPI 没有独立 D/C 线 */
         .spi_mode = 0,
-        .pclk_hz = LCD_PIXEL_CLOCK_HZ,
+        .pclk_hz = 3 * 1000 * 1000,        /* 先低速读屏版本 */
         .trans_queue_depth = 10,
         .on_color_trans_done = on_color_trans_done,
         .user_ctx = s_flush_done,
@@ -80,30 +135,39 @@ esp_err_t display_init(void)
             .quad_mode = true,
         },
     };
-
-    const spi_bus_config_t bus_cfg = {
-        .sclk_io_num = LCD_PIN_PCLK,
-        .data0_io_num = LCD_PIN_D0,
-        .data1_io_num = LCD_PIN_D1,
-        .data2_io_num = LCD_PIN_D2,
-        .data3_io_num = LCD_PIN_D3,
-        .max_transfer_sz = LCD_H_RES * LINE_CHUNK * sizeof(uint16_t),
-    };
-    ESP_RETURN_ON_ERROR(spi_bus_initialize(LCD_SPI_HOST, &bus_cfg, SPI_DMA_CH_AUTO),
-                        TAG, "spi_bus_initialize failed");
-
-    s_flush_done = xSemaphoreCreateBinary();
-    ESP_RETURN_ON_FALSE(s_flush_done, ESP_ERR_NO_MEM, TAG, "no memory for semaphore");
-    io_cfg.user_ctx = s_flush_done;
-
     ESP_RETURN_ON_ERROR(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)LCD_SPI_HOST,
                                                  &io_cfg, &s_io),
                         TAG, "esp_lcd_new_panel_io_spi failed");
 
+    /* 3. 读寄存器 0x04 判断屏幕版本 */
+    uint8_t id[4] = {0};
+    const int read_cmd = (LCD_OPCODE_READ_CMD << 24) | (0x04 << 8);
+    esp_err_t rd = esp_lcd_panel_io_rx_param(s_io, read_cmd, id, sizeof(id));
+    const bool id_valid = (rd == ESP_OK);
+    if (id_valid) {
+        ESP_LOGI(TAG, "panel reg 0x04 = %02X %02X %02X %02X", id[0], id[1], id[2], id[3]);
+    } else {
+        ESP_LOGW(TAG, "read reg 0x04 failed (%s), falling back to v1", esp_err_to_name(rd));
+    }
+
+    /* 4. 切到全速 */
+    ESP_RETURN_ON_ERROR(esp_lcd_panel_io_del(s_io), TAG, "panel io del failed");
+    s_io = NULL;
+    io_cfg.pclk_hz = LCD_PIXEL_CLOCK_HZ;
+    ESP_RETURN_ON_ERROR(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)LCD_SPI_HOST,
+                                                 &io_cfg, &s_io),
+                        TAG, "esp_lcd_new_panel_io_spi (fast) failed");
+
+    /* 5. 选初始化序列并建面板 */
+    const st77916_lcd_init_cmd_t *cmds = NULL;
+    uint16_t cmd_count = 0;
+    const char *ver_name = "?";
+    select_init_sequence(id, id_valid, &cmds, &cmd_count, &ver_name);
+    ESP_LOGI(TAG, "using init sequence %s (%u commands)", ver_name, (unsigned)cmd_count);
+
     st77916_vendor_config_t vendor_cfg = {
-        /* 组件自带的默认序列是给另一块 ST77916 屏的，必须用微雪 1.85B 的 */
-        .init_cmds = waveshare_185b_init_cmds,
-        .init_cmds_size = sizeof(waveshare_185b_init_cmds) / sizeof(waveshare_185b_init_cmds[0]),
+        .init_cmds = cmds,
+        .init_cmds_size = cmd_count,
         .flags = {
             .use_qspi_interface = 1,
         },
@@ -112,6 +176,9 @@ esp_err_t display_init(void)
         .reset_gpio_num = LCD_PIN_RST,
         .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB,
         .bits_per_pixel = 16,
+        .flags = {
+            .reset_active_high = 0,
+        },
         .vendor_config = &vendor_cfg,
     };
     ESP_RETURN_ON_ERROR(esp_lcd_new_panel_st77916(s_io, &panel_cfg, &s_panel),
@@ -134,7 +201,7 @@ esp_err_t display_init(void)
     ESP_RETURN_ON_FALSE(s_strip, ESP_ERR_NO_MEM, TAG, "no memory for strip buffer");
 
     display_backlight(true);
-    ESP_LOGI(TAG, "panel ready: %dx%d (ST77916 QSPI)", LCD_H_RES, LCD_V_RES);
+    ESP_LOGI(TAG, "panel ready: %dx%d (ST77916 QSPI, %s)", LCD_H_RES, LCD_V_RES, ver_name);
     return ESP_OK;
 }
 
@@ -152,6 +219,7 @@ void display_backlight(bool on)
 #endif
 }
 
+/* 用纯色填充矩形，按 LINE_CHUNK 行分批 DMA */
 void display_fill_rect(int x, int y, int w, int h, uint16_t color)
 {
     if (!s_panel || !s_strip || w <= 0 || h <= 0) {
@@ -192,9 +260,10 @@ int display_text_width(const char *text, uint8_t scale)
     return (int)strlen(text) * FONT8X16_WIDTH * scale;
 }
 
+/* 文本按 LINE_CHUNK 行分批渲染，避免单次传输超过 max_transfer_sz */
 void display_draw_text(int x, int y, const char *text, uint8_t scale, uint16_t fg, uint16_t bg)
 {
-    if (!s_panel || !text) {
+    if (!s_panel || !s_strip || !text) {
         return;
     }
     if (scale == 0) {
@@ -219,32 +288,29 @@ void display_draw_text(int x, int y, const char *text, uint8_t scale, uint16_t f
         return;
     }
 
-    const size_t buf_px = (size_t)(x1 - x0) * (size_t)(y1 - y0);
-    uint16_t *buf = heap_caps_malloc(buf_px * sizeof(uint16_t), MALLOC_CAP_DMA);
-    if (!buf) {
-        ESP_LOGW(TAG, "text buffer alloc failed (%u px)", (unsigned)buf_px);
-        return;
-    }
+    const size_t row_px = (size_t)(x1 - x0);
+    for (int yy = y0; yy < y1; yy += LINE_CHUNK) {
+        const int lines = ((y1 - yy) < LINE_CHUNK) ? (y1 - yy) : LINE_CHUNK;
+        uint16_t *p = s_strip;
 
-    uint16_t *p = buf;
-    for (int sy = y0; sy < y1; sy++) {
-        const int gy = (sy - y) / scale;
-        for (int sx = x0; sx < x1; sx++) {
-            const int idx = (sx - x) / glyph_w;
-            const int gx = ((sx - x) % glyph_w) / scale;
-            bool on = false;
+        for (int sy = yy; sy < yy + lines; sy++) {
+            const int gy = (sy - y) / scale;
+            for (int sx = x0; sx < x1; sx++) {
+                const int idx = (sx - x) / glyph_w;
+                const int gx = ((sx - x) % glyph_w) / scale;
+                bool on = false;
 
-            if (idx >= 0 && idx < len) {
-                const int code = (unsigned char)text[idx];
-                if (code >= FONT8X16_FIRST_CHAR && code <= FONT8X16_LAST_CHAR) {
-                    const uint8_t bits = font8x16[code - FONT8X16_FIRST_CHAR][gy];
-                    on = ((bits >> (FONT8X16_WIDTH - 1 - gx)) & 0x01) != 0;
+                if (idx >= 0 && idx < len) {
+                    const int code = (unsigned char)text[idx];
+                    if (code >= FONT8X16_FIRST_CHAR && code <= FONT8X16_LAST_CHAR) {
+                        const uint8_t bits = font8x16[code - FONT8X16_FIRST_CHAR][gy];
+                        on = ((bits >> (FONT8X16_WIDTH - 1 - gx)) & 0x01) != 0;
+                    }
                 }
+                *p++ = on ? fg : bg;
             }
-            *p++ = on ? fg : bg;
         }
+        push_bitmap(x0, yy, x1, yy + lines, s_strip);
     }
-
-    push_bitmap(x0, y0, x1, y1, buf);
-    free(buf);
+    (void)row_px;
 }

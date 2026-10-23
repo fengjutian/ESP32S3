@@ -12,9 +12,70 @@
 #include "esp_chip_info.h"
 #include "esp_flash.h"
 #include "esp_system.h"
+#include "esp_log.h"
 
 #include "display.h"
 #include "display_config.h"
+#include "touch.h"
+
+static const char *TAG = "app";
+
+/* 屏幕分区：标题区 / 触摸画布 / 状态行 */
+#define CANVAS_Y     110
+#define CANVAS_H     120
+#define LINE_XY_Y    245
+#define LINE_TAPS_Y  275
+#define LINE_UP_Y    305
+
+/* 画布上画一个十字准星 */
+static void draw_crosshair(uint16_t x, uint16_t y)
+{
+    display_fill_rect(x - 1, y - 8, 3, 17, COLOR_RED);
+    display_fill_rect(x - 8, y - 1, 17, 3, COLOR_RED);
+}
+
+static void ui_task(void *arg)
+{
+    (void)arg;
+
+    touch_point_t pt;
+    uint32_t taps = 0;
+    uint32_t last_sec = UINT32_MAX;
+    char line[48];
+
+    for (;;) {
+        if (touch_read(&pt)) {
+            taps++;
+
+            /* 清画布后重画准星，避免旧点残留 */
+            if (pt.y >= CANVAS_Y && pt.y < CANVAS_Y + CANVAS_H) {
+                display_fill_rect(0, CANVAS_Y, LCD_H_RES, CANVAS_H, COLOR_BLACK);
+                draw_crosshair(pt.x, pt.y);
+            }
+
+            snprintf(line, sizeof(line), "x=%3u  y=%3u", pt.x, pt.y);
+            display_fill_rect(0, LINE_XY_Y, LCD_H_RES, 18, COLOR_BLACK);
+            display_draw_text(16, LINE_XY_Y, line, 1, COLOR_YELLOW, COLOR_BLACK);
+
+            snprintf(line, sizeof(line), "taps: %lu", (unsigned long)taps);
+            display_fill_rect(0, LINE_TAPS_Y, LCD_H_RES, 18, COLOR_BLACK);
+            display_draw_text(16, LINE_TAPS_Y, line, 1, COLOR_WHITE, COLOR_BLACK);
+
+            printf("touch #%lu: x=%u y=%u\n", (unsigned long)taps, pt.x, pt.y);
+        }
+
+        /* 每秒刷新运行时间 */
+        uint32_t sec = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS) / 1000;
+        if (sec != last_sec) {
+            last_sec = sec;
+            snprintf(line, sizeof(line), "up %lus", (unsigned long)sec);
+            display_fill_rect(0, LINE_UP_Y, LCD_H_RES, 18, COLOR_BLACK);
+            display_draw_text(16, LINE_UP_Y, line, 1, COLOR_GREEN, COLOR_BLACK);
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+}
 
 void app_main(void)
 {
@@ -45,43 +106,46 @@ void app_main(void)
 
     printf("Minimum free heap size: %" PRIu32 " bytes\n", esp_get_minimum_free_heap_size());
 
-    /* 初始化屏幕：失败也不影响串口部分 */
+    /* ---------- 屏幕 ---------- */
     const bool screen_ok = (display_init() == ESP_OK);
     if (screen_ok) {
         display_clear(COLOR_BLACK);
 
         const char *title = "Hello World";
-        const uint8_t title_scale = 3;
-        display_draw_text((LCD_H_RES - display_text_width(title, title_scale)) / 2, 96,
-                          title, title_scale, COLOR_WHITE, COLOR_BLACK);
+        display_draw_text((LCD_H_RES - display_text_width(title, 2)) / 2, 16,
+                          title, 2, COLOR_WHITE, COLOR_BLACK);
 
-        const char *subtitle = "ESP32-S3";
-        const uint8_t subtitle_scale = 2;
-        display_draw_text((LCD_H_RES - display_text_width(subtitle, subtitle_scale)) / 2, 168,
-                          subtitle, subtitle_scale, COLOR_CYAN, COLOR_BLACK);
+        const char *sub = "ESP32-S3";
+        display_draw_text((LCD_H_RES - display_text_width(sub, 2)) / 2, 60,
+                          sub, 2, COLOR_CYAN, COLOR_BLACK);
+
+        const char *hint = "tap the canvas";
+        display_draw_text((LCD_H_RES - display_text_width(hint, 1)) / 2, 160,
+                          hint, 1, COLOR_GRAY, COLOR_BLACK);
     } else {
-        printf("LCD init failed - check the pins in main/display_config.h\n");
+        printf("LCD init failed - check main/display_config.h\n");
     }
 
-    /* Keep running instead of restarting: print a heartbeat every 2 seconds. */
-    uint32_t heartbeat = 0;
-    char line[64];
+    /* ---------- 触摸 ---------- */
+    const bool touch_ok = (touch_init() == ESP_OK);
+    if (!touch_ok) {
+        printf("touch init failed - check I2C pins in main/display_config.h\n");
+        if (screen_ok) {
+            display_draw_text(16, LINE_XY_Y, "touch not found", 1, COLOR_RED, COLOR_BLACK);
+        }
+    }
 
+    if (screen_ok && touch_ok) {
+        xTaskCreate(ui_task, "ui", 4096, NULL, 5, NULL);
+    }
+
+    /* 串口心跳，保持不变 */
+    uint32_t heartbeat = 0;
     while (1) {
         uint32_t uptime_ms = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
-        uint32_t free_heap = esp_get_free_heap_size();
-
         printf("Heartbeat #%" PRIu32 ": uptime %" PRIu32 " ms, free heap %" PRIu32 " bytes\n",
-               heartbeat, uptime_ms, free_heap);
+               heartbeat, uptime_ms, esp_get_free_heap_size());
         fflush(stdout);
-
-        if (screen_ok) {
-            snprintf(line, sizeof(line), "up %" PRIu32 "s   heap %" PRIu32 "K",
-                     uptime_ms / 1000, free_heap / 1024);
-            display_fill_rect(0, 260, LCD_H_RES, 20, COLOR_BLACK);
-            display_draw_text(20, 260, line, 1, COLOR_GREEN, COLOR_BLACK);
-        }
-
         heartbeat++;
         vTaskDelay(pdMS_TO_TICKS(2000));
     }

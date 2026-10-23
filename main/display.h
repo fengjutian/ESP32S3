@@ -1,0 +1,59 @@
+/*
+ * 极简 ST7789 文本显示接口（不依赖 LVGL，只用 esp_lcd + 内置 8x16 字模）。
+ *
+ * SPDX-License-Identifier: CC0-1.0
+ */
+#pragma once
+
+#include <stdbool.h>
+#include <stdint.h>
+
+#include "esp_err.h"
+
+/* RGB565 常用颜色 */
+#define COLOR_BLACK   0x0000
+#define COLOR_WHITE   0xFFFF
+#define COLOR_RED     0xF800
+#define COLOR_GREEN   0x07E0
+#define COLOR_BLUE    0x001F
+#define COLOR_YELLOW  0xFFE0
+#define COLOR_CYAN    0x07FF
+#define COLOR_MAGENTA 0xF81F
+#define COLOR_GRAY    0x8410
+#define COLOR_ORANGE  0xFD20
+
+/**
+ * @brief 初始化 SPI 总线 + ST7789 面板并点亮背光。
+ *
+ * @return ESP_OK 成功；其它值表示 SPI/面板初始化失败（此时程序仍可继续跑串口输出）。
+ */
+esp_err_t display_init(void);
+
+/**
+ * @brief 打开/关闭背光（LCD_PIN_BL 为 -1 时该函数无副作用）。
+ */
+void display_backlight(bool on);
+
+/**
+ * @brief 用纯色填充一个矩形（会自动裁剪到屏幕范围内）。
+ */
+void display_fill_rect(int x, int y, int w, int h, uint16_t color);
+
+/**
+ * @brief 整屏填充。
+ */
+void display_clear(uint16_t color);
+
+/**
+ * @brief 在 (x, y) 处画一行 ASCII 文本。
+ *
+ * @param scale 放大倍数，1 = 8x16 像素，2 = 16x32 像素
+ * @param fg    文字颜色（RGB565）
+ * @param bg    背景颜色（RGB565）
+ */
+void display_draw_text(int x, int y, const char *text, uint8_t scale, uint16_t fg, uint16_t bg);
+
+/**
+ * @brief 计算一行文本的像素宽度（用于居中排版）。
+ */
+int display_text_width(const char *text, uint8_t scale);

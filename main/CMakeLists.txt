@@ -1,3 +1,3 @@
-idf_component_register(SRCS "hello_world_main.c"
-                       PRIV_REQUIRES spi_flash
+idf_component_register(SRCS "hello_world_main.c" "display.c"
+                       PRIV_REQUIRES spi_flash esp_lcd esp_driver_spi esp_driver_gpio espressif__esp_lcd_st77916
                        INCLUDE_DIRS "")

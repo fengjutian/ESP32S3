@@ -8,8 +8,8 @@
  */
 #pragma once
 
-/* WiFi 名称（SSID）—— 待填，例如 "TP-LINK_5F2A" */
-#define APP_WIFI_SSID       "ChinaNet-LSFV9D"
+/* WiFi 名称（SSID）—— 华为 TC7102 的 2.4G 网络名 */
+#define APP_WIFI_SSID       "502"
 
 /* WiFi 密码 */
 #define APP_WIFI_PASSWORD   "15295558830"

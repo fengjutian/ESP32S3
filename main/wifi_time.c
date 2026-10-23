@@ -34,10 +34,14 @@ static const char *TAG = "time_sync";
 
 static EventGroupHandle_t s_events;
 static int s_retry;
+static volatile bool s_shutting_down;
 
 static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
+        if (s_shutting_down) {
+            return;   /* 我们自己调用了 esp_wifi_stop()，不是异常断开 */
+        }
         const wifi_event_sta_disconnected_t *ev = (wifi_event_sta_disconnected_t *)data;
         if (++s_retry <= 3) {
             ESP_LOGW(TAG, "disconnected (reason %d), retry %d", ev->reason, s_retry);
@@ -51,11 +55,11 @@ static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, voi
     }
 }
 
-/* 扫描一次，打印目标 SSID 是否在 2.4G 频段可见 */
+/* 扫描一次，列出周围所有 2.4G 热点，并标出目标 SSID 是否存在 */
 static void scan_ap(void)
 {
     wifi_scan_config_t scan_cfg = {
-        .ssid = (uint8_t *)APP_WIFI_SSID,
+        .ssid = NULL,          /* 扫描全部 */
         .show_hidden = false,
     };
 
@@ -67,7 +71,7 @@ static void scan_ap(void)
     uint16_t ap_num = 0;
     esp_wifi_scan_get_ap_num(&ap_num);
     if (ap_num == 0) {
-        ESP_LOGW(TAG, "SSID \"%s\" NOT found in 2.4GHz scan", APP_WIFI_SSID);
+        ESP_LOGW(TAG, "no AP found at all");
         return;
     }
 
@@ -77,12 +81,22 @@ static void scan_ap(void)
     }
     esp_wifi_scan_get_ap_records(&ap_num, recs);
 
+    ESP_LOGI(TAG, "---- %u AP(s) visible in 2.4GHz ----", (unsigned)ap_num);
+    bool found = false;
     for (int i = 0; i < ap_num; i++) {
-        ESP_LOGI(TAG, "AP \"%s\"  rssi=%d  ch=%d  auth=%d",
-                 (const char *)recs[i].ssid, recs[i].rssi,
-                 recs[i].primary, recs[i].authmode);
+        const bool match = (strcmp((const char *)recs[i].ssid, APP_WIFI_SSID) == 0);
+        if (match) {
+            found = true;
+        }
+        ESP_LOGI(TAG, "%s \"%s\"  rssi=%d  ch=%d  auth=%d",
+                 match ? "->" : "  ", (const char *)recs[i].ssid,
+                 recs[i].rssi, recs[i].primary, recs[i].authmode);
     }
     free(recs);
+
+    if (!found) {
+        ESP_LOGW(TAG, "target \"%s\" NOT in the list above", APP_WIFI_SSID);
+    }
 }
 
 static void time_sync_task(void *arg)
@@ -130,6 +144,7 @@ static void time_sync_task(void *arg)
                                                  pdMS_TO_TICKS(WIFI_TIMEOUT_MS));
     if (!(bits & WIFI_CONNECTED_BIT)) {
         ESP_LOGW(TAG, "WiFi connect failed, keep running on RTC");
+        s_shutting_down = true;
         esp_wifi_stop();
         vTaskDelete(NULL);
         return;
@@ -168,6 +183,7 @@ static void time_sync_task(void *arg)
     }
 
     esp_netif_sntp_deinit();
+    s_shutting_down = true;
     esp_wifi_stop();
     ESP_LOGI(TAG, "WiFi off, sync task done");
 

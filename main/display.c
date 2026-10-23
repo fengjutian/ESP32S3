@@ -177,6 +177,7 @@ esp_err_t display_init(void)
     esp_lcd_panel_dev_config_t panel_cfg = {
         .reset_gpio_num = LCD_PIN_RST,
         .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB,
+        .data_endian = LCD_RGB_DATA_ENDIAN_LITTLE,  /* 字节序：默认 BIG 会导致颜色整体反色 */
         .bits_per_pixel = 16,
         .flags = {
             .reset_active_high = 0,

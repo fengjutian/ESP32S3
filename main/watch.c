@@ -36,7 +36,7 @@ static const char *TAG = "watch";
 #define RING_R            172
 #define RING_W            8
 
-#define COLOR_TRACK       0x2104  /* 深灰：圆环未走过的部分 */
+#define COLOR_TRACK       0x4208  /* 中灰：圆环未走过的部分 */
 
 typedef enum {
     FACE_CLASSIC = 0,
@@ -172,22 +172,25 @@ static void draw_classic(const rtc_time_t *t, bool full)
 
     if (full) {
         display_clear(COLOR_BLACK);
-        classic_ring(t);
-
-        format_time(t, buf, sizeof(buf), s_h24);
-        text_center(148, buf, 4, COLOR_WHITE);
-
-        snprintf(buf, sizeof(buf), "%d年%d月%d日", t->year, t->month, t->day);
-        text_center(228, buf, 2, COLOR_CYAN);
-        text_center(268, WEEK_CN[t->weekday % 7], 1, COLOR_GRAY);
-
-        format_battery(buf, sizeof(buf));
-        text_center(310, buf, 1, COLOR_GRAY);
-
-        if (!s_h24) {
-            text_center(120, (t->hour < 12) ? "上午" : "下午", 1, COLOR_GRAY);
-        }
     }
+
+    /* 圆环会把整个圆形包围盒刷成背景色，所以每一帧都要重画所有文字 */
+    classic_ring(t);
+
+    if (!s_h24) {
+        text_center(112, (t->hour < 12) ? "上午" : "下午", 1, COLOR_GRAY);
+    }
+
+    format_time(t, buf, sizeof(buf), s_h24);
+    text_center(140, buf, 4, COLOR_WHITE);
+
+    snprintf(buf, sizeof(buf), "%d年%d月%d日", t->year, t->month, t->day);
+    text_center(232, buf, 1, COLOR_CYAN);
+
+    text_center(258, WEEK_CN[t->weekday % 7], 1, COLOR_GRAY);
+
+    format_battery(buf, sizeof(buf));
+    text_center(300, buf, 1, COLOR_GRAY);
 }
 
 static void draw_minimal(const rtc_time_t *t, bool full)
@@ -279,21 +282,8 @@ static void render_tick(const rtc_time_t *t, bool minute_changed, bool day_chang
 
     switch (s_face) {
     case FACE_CLASSIC:
-        classic_ring(t);
-        if (minute_changed) {
-            display_fill_rect(0, 140, LCD_H_RES, 84, COLOR_BLACK);
-            format_time(t, buf, sizeof(buf), s_h24);
-            text_center(148, buf, 4, COLOR_WHITE);
-            if (!s_h24) {
-                text_center(120, (t->hour < 12) ? "上午" : "下午", 1, COLOR_GRAY);
-            }
-        }
-        if (day_changed) {
-            snprintf(buf, sizeof(buf), "%d年%d月%d日", t->year, t->month, t->day);
-            display_fill_rect(0, 224, LCD_H_RES, 70, COLOR_BLACK);
-            text_center(228, buf, 2, COLOR_CYAN);
-            text_center(268, WEEK_CN[t->weekday % 7], 1, COLOR_GRAY);
-        }
+        /* 圆环重绘会擦掉一切，所以整帧重画 */
+        draw_classic(t, false);
         break;
 
     case FACE_MINIMAL:
@@ -383,6 +373,12 @@ static void watch_task(void *arg)
             last_second = now.second;
             last_minute = now.minute;
             last_day = now.day;
+        }
+
+        if (min_changed) {
+            ESP_LOGI(TAG, "now %04d-%02d-%02d %02d:%02d:%02d (%s)",
+                     now.year, now.month, now.day, now.hour, now.minute, now.second,
+                     got_time ? "RTC" : "soft");
         }
 
         /* 触摸：按下沿记录起点，抬起时判断滑动或点击 */

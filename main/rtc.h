@@ -21,19 +21,19 @@ typedef struct {
 } rtc_time_t;
 
 /** @brief 初始化 RTC（内部会确保 I2C 总线已初始化）。 */
-esp_err_t rtc_init(void);
+esp_err_t pcf85063_init(void);
 
 /** @brief RTC 是否可用。 */
-bool rtc_present(void);
+bool pcf85063_present(void);
 
 /**
  * @brief 读取时间。
  * @return ESP_ERR_INVALID_STATE 表示振荡器停过、时间不可信。
  */
-esp_err_t rtc_read(rtc_time_t *t);
+esp_err_t pcf85063_read(rtc_time_t *t);
 
 /** @brief 写入时间（同时清除停止标志）。 */
-esp_err_t rtc_write(const rtc_time_t *t);
+esp_err_t pcf85063_write(const rtc_time_t *t);
 
 /** @brief 计算某天的星期（0=周日）。 */
-int rtc_weekday(int year, int month, int day);
+int pcf85063_weekday(int year, int month, int day);

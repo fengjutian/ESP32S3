@@ -19,6 +19,7 @@
 #include "esp_check.h"
 #include "esp_log.h"
 
+#include "board_i2c.h"
 #include "display_config.h"
 
 static const char *TAG = "touch";
@@ -30,7 +31,6 @@ static const char *TAG = "touch";
 #define EVENT_UP            0x01
 #define EVENT_CONTACT       0x02
 
-static i2c_master_bus_handle_t s_bus;
 static i2c_master_dev_handle_t s_dev;
 
 esp_err_t touch_init(void)
@@ -46,27 +46,13 @@ esp_err_t touch_init(void)
     gpio_set_level(TOUCH_PIN_RST, 1);
     vTaskDelay(pdMS_TO_TICKS(50));
 
-    i2c_master_bus_config_t bus_cfg = {
-        .i2c_port = TOUCH_I2C_PORT,
-        .sda_io_num = TOUCH_PIN_SDA,
-        .scl_io_num = TOUCH_PIN_SCL,
-        .clk_source = I2C_CLK_SRC_DEFAULT,
-        .glitch_ignore_cnt = 7,
-        .flags = {
-            .enable_internal_pullup = true,
-        },
-    };
-    ESP_RETURN_ON_ERROR(i2c_new_master_bus(&bus_cfg, &s_bus), TAG, "i2c bus init failed");
-
-    i2c_device_config_t dev_cfg = {
-        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-        .device_address = TOUCH_I2C_ADDR,
-        .scl_speed_hz = TOUCH_I2C_HZ,
-    };
-    ESP_RETURN_ON_ERROR(i2c_master_bus_add_device(s_bus, &dev_cfg, &s_dev),
+    ESP_RETURN_ON_ERROR(board_i2c_init(), TAG, "i2c bus init failed");
+    ESP_RETURN_ON_ERROR(board_i2c_add_device(TOUCH_I2C_ADDR, TOUCH_I2C_HZ, &s_dev),
                         TAG, "add CST816S device failed");
 
-    esp_err_t probe = i2c_master_probe(s_bus, TOUCH_I2C_ADDR, 100);
+    uint8_t reg = REG_FINGER_NUM;
+    uint8_t dummy = 0;
+    esp_err_t probe = i2c_master_transmit_receive(s_dev, &reg, 1, &dummy, 1, 100);
     if (probe != ESP_OK) {
         ESP_LOGE(TAG, "CST816S not responding at 0x%02X (%s)", TOUCH_I2C_ADDR, esp_err_to_name(probe));
         return probe;

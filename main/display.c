@@ -26,6 +26,7 @@
 #include "display.h"
 #include "display_config.h"
 #include "font8x16.h"
+#include "font16x16_zh.h"
 #include "st77916_init_cmds.h"
 
 static const char *TAG = "display";
@@ -313,4 +314,143 @@ void display_draw_text(int x, int y, const char *text, uint8_t scale, uint16_t f
         push_bitmap(x0, yy, x1, yy + lines, s_strip);
     }
     (void)row_px;
+}
+
+/* ------------------------------------------------------------------ */
+/* UTF-8 文本：ASCII 用 8x16 字模，中文用 16x16 点阵                    */
+/* ------------------------------------------------------------------ */
+
+static const uint8_t *zh_lookup(uint16_t code)
+{
+    int lo = 0;
+    int hi = ZH_FONT_COUNT - 1;
+
+    while (lo <= hi) {
+        const int mid = (lo + hi) / 2;
+        if (zh_font[mid].code == code) {
+            return zh_font[mid].bitmap;
+        }
+        if (zh_font[mid].code < code) {
+            lo = mid + 1;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    return NULL;
+}
+
+/* 返回消耗的字节数，cp 为解码出的 Unicode 码位 */
+static int utf8_decode(const uint8_t *p, uint32_t *cp)
+{
+    if (p[0] < 0x80) {
+        *cp = p[0];
+        return 1;
+    }
+    if ((p[0] & 0xE0) == 0xC0) {
+        *cp = ((uint32_t)(p[0] & 0x1F) << 6) | (p[1] & 0x3F);
+        return 2;
+    }
+    if ((p[0] & 0xF0) == 0xE0) {
+        *cp = ((uint32_t)(p[0] & 0x0F) << 12) |
+              ((uint32_t)(p[1] & 0x3F) << 6) | (p[2] & 0x3F);
+        return 3;
+    }
+    if ((p[0] & 0xF8) == 0xF0) {
+        *cp = ((uint32_t)(p[0] & 0x07) << 18) |
+              ((uint32_t)(p[1] & 0x3F) << 12) |
+              ((uint32_t)(p[2] & 0x3F) << 6) | (p[3] & 0x3F);
+        return 4;
+    }
+    *cp = '?';
+    return 1;
+}
+
+/* 把 w x h 的位图画到屏幕，每行 stride 字节，MSB 在左 */
+static void blit_glyph(int x, int y, const uint8_t *rows, int w, int h,
+                       uint8_t scale, uint16_t fg, uint16_t bg)
+{
+    if (!s_panel || !s_strip || !rows) {
+        return;
+    }
+
+    const int stride = (w + 7) / 8;
+    int x0 = (x < 0) ? 0 : x;
+    int y0 = (y < 0) ? 0 : y;
+    int x1 = x + w * scale;
+    int y1 = y + h * scale;
+    if (x1 > LCD_H_RES) x1 = LCD_H_RES;
+    if (y1 > LCD_V_RES) y1 = LCD_V_RES;
+    if (x0 >= x1 || y0 >= y1) {
+        return;
+    }
+
+    for (int yy = y0; yy < y1; yy += LINE_CHUNK) {
+        const int lines = ((y1 - yy) < LINE_CHUNK) ? (y1 - yy) : LINE_CHUNK;
+        uint16_t *p = s_strip;
+
+        for (int sy = yy; sy < yy + lines; sy++) {
+            const int gy = (sy - y) / scale;
+            for (int sx = x0; sx < x1; sx++) {
+                const int gx = (sx - x) / scale;
+                const uint8_t bits = rows[gy * stride + (gx >> 3)];
+                const bool on = ((bits >> (7 - (gx & 7))) & 0x01) != 0;
+                *p++ = on ? fg : bg;
+            }
+        }
+        push_bitmap(x0, yy, x1, yy + lines, s_strip);
+    }
+}
+
+void display_draw_text_utf8(int x, int y, const char *text, uint8_t scale, uint16_t fg, uint16_t bg)
+{
+    if (!s_panel || !s_strip || !text) {
+        return;
+    }
+    if (scale == 0) {
+        scale = 1;
+    }
+
+    const uint8_t *p = (const uint8_t *)text;
+    while (*p) {
+        uint32_t cp = 0;
+        p += utf8_decode(p, &cp);
+
+        const uint8_t *bmp;
+        int w = 8;
+
+        if (cp < 0x80) {
+            bmp = (cp >= FONT8X16_FIRST_CHAR && cp <= FONT8X16_LAST_CHAR)
+                      ? font8x16[cp - FONT8X16_FIRST_CHAR]
+                      : font8x16['?' - FONT8X16_FIRST_CHAR];
+        } else {
+            bmp = (cp <= 0xFFFF) ? zh_lookup((uint16_t)cp) : NULL;
+            if (bmp) {
+                w = 16;
+            } else {
+                bmp = font8x16['?' - FONT8X16_FIRST_CHAR];
+            }
+        }
+
+        blit_glyph(x, y, bmp, w, FONT8X16_HEIGHT, scale, fg, bg);
+        x += w * scale;
+        if (x >= LCD_H_RES) {
+            break;
+        }
+    }
+}
+
+int display_text_width_utf8(const char *text, uint8_t scale)
+{
+    if (!text || scale == 0) {
+        return 0;
+    }
+
+    int w = 0;
+    const uint8_t *p = (const uint8_t *)text;
+    while (*p) {
+        uint32_t cp = 0;
+        p += utf8_decode(p, &cp);
+        w += ((cp < 0x80) ? FONT8X16_WIDTH : 16) * scale;
+    }
+    return w;
 }

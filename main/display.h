@@ -57,3 +57,16 @@ void display_draw_text(int x, int y, const char *text, uint8_t scale, uint16_t f
  * @brief 计算一行文本的像素宽度（用于居中排版）。
  */
 int display_text_width(const char *text, uint8_t scale);
+
+/**
+ * @brief 绘制 UTF-8 文本，ASCII 用 8x16 字模，中文用 16x16 点阵。
+ *
+ * 字形宽度：ASCII 8*scale，中文 16*scale（一个汉字）。未知字符画 '?'。
+ */
+void display_draw_text_utf8(int x, int y, const char *text, uint8_t scale, uint16_t fg, uint16_t bg);
+
+/**
+ * @brief 计算 UTF-8 文本的像素宽度。
+ */
+int display_text_width_utf8(const char *text, uint8_t scale);
+

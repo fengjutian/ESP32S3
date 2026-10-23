@@ -70,3 +70,19 @@ void display_draw_text_utf8(int x, int y, const char *text, uint8_t scale, uint1
  */
 int display_text_width_utf8(const char *text, uint8_t scale);
 
+/**
+ * @brief 画一段圆环（用于秒针进度）。
+ *
+ * @param cx, cy     圆心
+ * @param radius     外半径
+ * @param thickness  环宽
+ * @param start_deg  起始角度（0 = 12 点方向，顺时针为正）
+ * @param end_deg    结束角度
+ * @param fg         进度段颜色
+ * @param track      未走过部分的颜色
+ * @param bg         环外区域颜色
+ */
+void display_draw_ring(int cx, int cy, int radius, int thickness,
+                       int start_deg, int end_deg,
+                       uint16_t fg, uint16_t track, uint16_t bg);
+

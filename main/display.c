@@ -8,6 +8,7 @@
  */
 
 #include <string.h>
+#include <math.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -453,4 +454,55 @@ int display_text_width_utf8(const char *text, uint8_t scale)
         w += ((cp < 0x80) ? FONT8X16_WIDTH : 16) * scale;
     }
     return w;
+}
+
+void display_draw_ring(int cx, int cy, int radius, int thickness,
+                       int start_deg, int end_deg,
+                       uint16_t fg, uint16_t track, uint16_t bg)
+{
+    if (!s_panel || !s_strip || radius <= 0 || thickness <= 0) {
+        return;
+    }
+
+    const int r_in = (radius - thickness > 0) ? (radius - thickness) : 0;
+    const int r_out2 = radius * radius;
+    const int r_in2 = r_in * r_in;
+
+    int x0 = cx - radius;
+    int x1 = cx + radius + 1;
+    int y0 = cy - radius;
+    int y1 = cy + radius + 1;
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 > LCD_H_RES) x1 = LCD_H_RES;
+    if (y1 > LCD_V_RES) y1 = LCD_V_RES;
+    if (x0 >= x1 || y0 >= y1) {
+        return;
+    }
+
+    for (int yy = y0; yy < y1; yy += LINE_CHUNK) {
+        const int lines = ((y1 - yy) < LINE_CHUNK) ? (y1 - yy) : LINE_CHUNK;
+        uint16_t *p = s_strip;
+
+        for (int sy = yy; sy < yy + lines; sy++) {
+            const int dy = sy - cy;
+            for (int sx = x0; sx < x1; sx++) {
+                const int dx = sx - cx;
+                const int d2 = dx * dx + dy * dy;
+                uint16_t color;
+
+                if (d2 > r_out2 || d2 < r_in2) {
+                    color = bg;
+                } else {
+                    float deg = atan2f((float)dx, (float)(-dy)) * 57.29578f;
+                    if (deg < 0.0f) {
+                        deg += 360.0f;
+                    }
+                    color = (deg >= (float)start_deg && deg < (float)end_deg) ? fg : track;
+                }
+                *p++ = color;
+            }
+        }
+        push_bitmap(x0, yy, x1, yy + lines, s_strip);
+    }
 }

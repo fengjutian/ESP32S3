@@ -26,6 +26,7 @@
 #include "display.h"
 #include "display_config.h"
 #include "font8x16.h"
+#include "st77916_init_cmds.h"
 
 static const char *TAG = "display";
 
@@ -100,8 +101,9 @@ esp_err_t display_init(void)
                         TAG, "esp_lcd_new_panel_io_spi failed");
 
     st77916_vendor_config_t vendor_cfg = {
-        .init_cmds = NULL,          /* 用组件自带的默认初始化序列 */
-        .init_cmds_size = 0,
+        /* 组件自带的默认序列是给另一块 ST77916 屏的，必须用微雪 1.85B 的 */
+        .init_cmds = waveshare_185b_init_cmds,
+        .init_cmds_size = sizeof(waveshare_185b_init_cmds) / sizeof(waveshare_185b_init_cmds[0]),
         .flags = {
             .use_qspi_interface = 1,
         },

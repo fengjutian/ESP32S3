@@ -50,7 +50,10 @@ esp_err_t bq27220_init(void)
     }
 
     s_present = true;
-    ESP_LOGI(TAG, "BQ27220 ready at 0x%02X, %u mV", BQ27220_ADDR, (unsigned)mv);
+
+    uint16_t soc = 0;
+    read_word(CMD_SOC, &soc);
+    ESP_LOGI(TAG, "BQ27220 ready at 0x%02X, %u mV, %u%%", BQ27220_ADDR, (unsigned)mv, (unsigned)soc);
     return ESP_OK;
 }
 

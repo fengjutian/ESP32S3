@@ -37,18 +37,52 @@ static int s_retry;
 
 static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
-    if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
-        esp_wifi_connect();
-    } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
+    if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
+        const wifi_event_sta_disconnected_t *ev = (wifi_event_sta_disconnected_t *)data;
         if (++s_retry <= 3) {
-            ESP_LOGW(TAG, "disconnected, retry %d", s_retry);
+            ESP_LOGW(TAG, "disconnected (reason %d), retry %d", ev->reason, s_retry);
             esp_wifi_connect();
         } else {
+            ESP_LOGW(TAG, "disconnected (reason %d), giving up", ev->reason);
             xEventGroupSetBits(s_events, WIFI_FAILED_BIT);
         }
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         xEventGroupSetBits(s_events, WIFI_CONNECTED_BIT);
     }
+}
+
+/* 扫描一次，打印目标 SSID 是否在 2.4G 频段可见 */
+static void scan_ap(void)
+{
+    wifi_scan_config_t scan_cfg = {
+        .ssid = (uint8_t *)APP_WIFI_SSID,
+        .show_hidden = false,
+    };
+
+    if (esp_wifi_scan_start(&scan_cfg, true) != ESP_OK) {
+        ESP_LOGW(TAG, "scan failed");
+        return;
+    }
+
+    uint16_t ap_num = 0;
+    esp_wifi_scan_get_ap_num(&ap_num);
+    if (ap_num == 0) {
+        ESP_LOGW(TAG, "SSID \"%s\" NOT found in 2.4GHz scan", APP_WIFI_SSID);
+        return;
+    }
+
+    wifi_ap_record_t *recs = calloc(ap_num, sizeof(wifi_ap_record_t));
+    if (!recs) {
+        return;
+    }
+    esp_wifi_scan_get_ap_records(&ap_num, recs);
+
+    for (int i = 0; i < ap_num; i++) {
+        ESP_LOGI(TAG, "AP \"%s\"  rssi=%d  ch=%d  auth=%d",
+                 (const char *)recs[i].ssid, recs[i].rssi,
+                 recs[i].primary, recs[i].authmode);
+    }
+    free(recs);
 }
 
 static void time_sync_task(void *arg)
@@ -86,6 +120,9 @@ static void time_sync_task(void *arg)
     ESP_ERROR_CHECK(esp_wifi_start());
 
     ESP_LOGI(TAG, "connecting to \"%s\"...", APP_WIFI_SSID);
+
+    scan_ap();
+    esp_wifi_connect();
 
     const EventBits_t bits = xEventGroupWaitBits(s_events,
                                                  WIFI_CONNECTED_BIT | WIFI_FAILED_BIT,

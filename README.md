@@ -1,14 +1,28 @@
 # hello_world — ESP32-S3-Touch-LCD-1.85B
 
-基于 ESP-IDF 的 `hello_world` 示例改造：**串口打印 + 屏幕显示文字**，运行在
-微雪 (Waveshare) **ESP32-S3-Touch-LCD-1.85B** 开发板上。
+基于 ESP-IDF 的 `hello_world` 示例改造而成的 **智能表盘**，运行在
+微雪 (Waveshare) **ESP32-S3-Touch-LCD-1.85B** 开发板上（360×360 触摸屏）。
 
-程序不再无限重启，而是常驻运行：开机画一次标题，之后每 2 秒刷新一行运行状态。
+## 功能
+
+- **三种表盘**，左右滑动切换，轻触切换 12/24 小时制
+  - 经典：外圈秒针圆环 + 大字号时间 + 中文日期
+  - 极简：超大时间 + 秒数
+  - 信息：电量 / 电压 / 时间 / 日期 / 运行时长
+- **中文显示**：GB2312 一级汉字 + 符号，16×16 点阵，中英混排
+- **RTC 走时**：PCF85063，掉电自动用编译时间重新播种
+- **联网校时**：开机后台连 WiFi + SNTP，校准后写回 RTC 并关闭 WiFi
+- **电量显示**：BQ27220 电量计，每 5 秒刷新
 
 ```
-Hello World        ← 白色，3 倍字（24x48 像素）
-ESP32-S3           ← 青色，2 倍字
-up 12s   heap 362K ← 绿色，每 2 秒刷新
+     经典表盘                              信息表盘
+   ╭─────────╮                        ┌─────────────┐
+   │  23:29  │  ← 白色 4 倍字          │   设备信息   │
+   │ 2026年  │  ← 青色 2 倍字          │ 电量   100%  │
+   │ 10月23日 │                        │ 电压   4.12V │
+   │ 星期五   │                        │ 时间   23:29 │
+   │ 电池 100%│                        │ 运行   00:03 │
+   ╰─────────╯                        └─────────────┘
 ```
 
 ---
@@ -88,11 +102,27 @@ idf.py -p COM3 flash
 ### 烧录成功时的串口日志
 
 ```
-I (289) display: panel reg 0x04 = 00 02 7F 7F
-I (299) display: using init sequence v2 (185 commands)
-I (569) display: panel ready: 360x360 (ST77916 QSPI, v2)
-Heartbeat #0: uptime 600 ms, free heap 370644 bytes
+I (364) display: using init sequence v2 (185 commands)
+I (634) display: panel ready: 360x360 (ST77916 QSPI, v2)
+I (634) pcf85063: PCF85063 ready at 0x51
+I (634) bq27220: BQ27220 ready at 0x55, 4125 mV, 100%
+I (694) touch: CST816S ready at 0x15
+W (984) time_sync: no WiFi credentials in main/app_config.h, skipping sync
 ```
+
+### 启用联网校时
+
+编辑 [main/app_config.h](main/app_config.h)：
+
+```c
+#define APP_WIFI_SSID       "你的WiFi名称"
+#define APP_WIFI_PASSWORD   "你的WiFi密码"
+#define APP_NTP_SERVER      "ntp.aliyun.com"
+#define APP_TZ              "CST-8"          /* 中国标准时间 */
+```
+
+留空则跳过校时，表盘继续用 RTC 走时。校时成功后日志会打印
+`RTC updated: 2026-10-23 23:45:01`，随后自动关闭 WiFi（省电、降发热）。
 
 ---
 
@@ -105,7 +135,14 @@ Heartbeat #0: uptime 600 ms, free heap 370644 bytes
 | [main/display.h](main/display.h) | API 与 RGB565 颜色宏 |
 | [main/st77916_init_cmds.h](main/st77916_init_cmds.h) | 厂商 v1（182 条）/ v2（185 条）初始化序列 |
 | [main/font8x16.h](main/font8x16.h) | 8×16 ASCII 点阵字模（字符 32~126，Consolas 14px 生成） |
-| [main/hello_world_main.c](main/hello_world_main.c) | `app_main`：串口打印 + 屏幕内容 + 心跳循环 |
+| [main/hello_world_main.c](main/hello_world_main.c) | `app_main`：初始化各外设并启动表盘、联网校时 |
+| [main/watch.c](main/watch.c) / [watch.h](main/watch.h) | 表盘应用：三种表盘、滑动切换、秒针圆环 |
+| [main/touch.c](main/touch.c) / [touch.h](main/touch.h) | CST816S 触摸驱动（轮询读坐标） |
+| [main/rtc.c](main/rtc.c) / [rtc.h](main/rtc.h) | PCF85063 RTC 驱动（BCD 读写、掉电标志、星期计算） |
+| [main/bq27220.c](main/bq27220.c) / [bq27220.h](main/bq27220.h) | BQ27220 电量计（电压、电量百分比） |
+| [main/wifi_time.c](main/wifi_time.c) / [wifi_time.h](main/wifi_time.h) | 后台 WiFi + SNTP 校时，写入 RTC |
+| [main/board_i2c.c](main/board_i2c.c) / [board_i2c.h](main/board_i2c.h) | 共享 I2C 总线（触摸/RTC/电量计） |
+| [main/app_config.h](main/app_config.h) | **WiFi 账号、NTP 服务器、时区** |
 
 ### API 用法
 
@@ -184,12 +221,20 @@ hello_world/
 ├── sdkconfig                      本地生成配置（已 gitignore）
 ├── pytest_hello_world.py          原示例的自动化测试脚本
 ├── main/
-│   ├── CMakeLists.txt             组件依赖：esp_lcd / esp_driver_spi / esp_driver_gpio / esp_lcd_st77916
-│   ├── hello_world_main.c         应用入口
-│   ├── display.c / display.h      ST77916 显示驱动
-│   ├── display_config.h           硬件配置（引脚、分辨率、时钟）
-│   ├── st77916_init_cmds.h        厂商初始化序列 v1 / v2
+│   ├── CMakeLists.txt             组件依赖清单
+│   ├── hello_world_main.c         应用入口：初始化 + 启动任务
+│   ├── app_config.h               WiFi 账号 / NTP / 时区
+│   ├── display.c / display.h      ST77916 显示驱动（文本、填充、圆环）
+│   ├── display_config.h           硬件配置（引脚、分辨率、时钟、触摸方向）
 │   ├── font8x16.h                 8×16 ASCII 字模
+│   ├── font16x16_zh.h             16×16 GB2312 中文字模（4437 字）
+│   ├── st77916_init_cmds.h        厂商初始化序列 v1 / v2
+│   ├── touch.c / touch.h          CST816S 触摸
+│   ├── rtc.c / rtc.h              PCF85063 实时时钟
+│   ├── bq27220.c / bq27220.h      BQ27220 电量计
+│   ├── wifi_time.c / wifi_time.h  WiFi + SNTP 后台校时
+│   ├── watch.c / watch.h          表盘应用
+│   ├── board_i2c.c / board_i2c.h  共享 I2C 总线
 │   └── idf_component.yml          组件管理器清单（espressif/esp_lcd_st77916 ^2.0.2）
 └── managed_components/            组件管理器下载的依赖（已 gitignore）
 ```
@@ -200,9 +245,10 @@ hello_world/
 
 ## 7. 下一步可做
 
-- **触摸交互**：接 CST816S（I2C `0x15`，SCL=10 / SDA=11 / INT=4 / RST=1），触摸后换文字
-- **显示中文**：当前字模只有 ASCII，需要 GB2312 / 点阵字库生成
-- **上 LVGL**：`lvgl/lvgl` + `espressif/esp_lvgl_port`，做图形界面
+- **指针式表盘**：在圆环内画时针/分针，用 `display_draw_line` 之类的原语扩展
+- **上 LVGL**：`lvgl/lvgl` + `espressif/esp_lvgl_port`，做更复杂的界面与动画
+- **IMU 手势**：QMI8658（I2C `0x6B`），抬腕亮屏 / 摇一摇换表盘
+- **低功耗**：息屏 + 触摸唤醒，延长电池续航
 - **恢复出厂界面**：用微雪提供的固件包重新烧写
 
 ---

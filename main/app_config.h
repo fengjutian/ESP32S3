@@ -1,13 +1,18 @@
 /*
  * 应用级配置（WiFi 账号、NTP 服务器、时区）。
  *
+ * 注意：这个文件含密码，已加入 .gitignore，不会被提交。
+ *       新克隆项目时请从 app_config.example.h 复制一份。
+ *
  * SPDX-License-Identifier: CC0-1.0
  */
 #pragma once
 
-/* 把下面两行填成你的 WiFi；留空则跳过联网校时，表盘继续用 RTC 走时 */
-#define APP_WIFI_SSID       ""
-#define APP_WIFI_PASSWORD   ""
+/* WiFi 名称（SSID）—— 待填，例如 "TP-LINK_5F2A" */
+#define APP_WIFI_SSID       "ChinaNet-LSFV9D"
+
+/* WiFi 密码 */
+#define APP_WIFI_PASSWORD   "15295558830"
 
 /* NTP 服务器；国内可用 ntp.aliyun.com / cn.pool.ntp.org */
 #define APP_NTP_SERVER      "ntp.aliyun.com"

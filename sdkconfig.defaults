@@ -1,0 +1,4 @@
+# This board is an ESP32-S3 module with 16 MB SPI flash.
+# Keeping this here (instead of only in sdkconfig, which is gitignored)
+# makes the setting survive "idf.py set-target" and fresh checkouts.
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y

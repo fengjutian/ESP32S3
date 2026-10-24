@@ -220,10 +220,12 @@ int w = display_text_width("Hello World", 3);     // 计算宽度，便于居中
 8. **屏的可视区是圆形。** 面板是 360×360，但只有内切圆可见，四角被外壳遮住。
    排版要收在半径 ~165 的圆内，否则日期/状态行会落到看不见的区域。
 
-9. **像素字节序必须显式设成 LITTLE。**
-   `esp_lcd_panel_dev_config_t.data_endian` 默认是 BIG，会导致所有颜色两个字节对调：
-   青色 → 黄色、灰色 → 深蓝、绿色 → 洋红（白色因为对称看不出来）。
-   在 [display.c](main/display.c) 里设 `.data_endian = LCD_RGB_DATA_ENDIAN_LITTLE` 后正常。
+9. **像素字节序要在软件里做一次交换。**
+   厂商初始化序列里有 4 条 `0xC8`（RAMCTL），它固定了面板的字节序，会**覆盖**
+   `esp_lcd_panel_dev_config_t.data_endian`，所以设成 `LITTLE` 也不起作用。
+   现象：青色→黄色、灰色→深蓝、绿色→洋红（白色对称，看不出来）。
+   现在在 [display.c](main/display.c) 的 `push_bitmap()` 里统一交换一次字节，
+   所有绘制路径（填充、文字、圆环、行缓冲）都会生效。
 
 10. **`display_draw_ring()` 会重绘整个圆形包围盒**（非环区域填背景色），
     所以圆环之后必须重画所有文字，否则日期/星期会被每秒一次的圆环刷新擦掉。

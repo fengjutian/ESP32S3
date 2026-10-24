@@ -59,8 +59,17 @@ static void wait_flush(void)
     }
 }
 
-static void push_bitmap(int x0, int y0, int x1, int y1, const void *buf)
+static void push_bitmap(int x0, int y0, int x1, int y1, const void *buf_in)
 {
+    /* 面板初始化序列里的 0xC8 (RAMCTL) 固定了字节序，data_endian 会被覆盖，
+     * 所以在这里统一做一次字节交换。所有绘制路径都经过这里。 */
+    uint16_t *buf = (uint16_t *)buf_in;
+    const size_t n = (size_t)(x1 - x0) * (size_t)(y1 - y0);
+    for (size_t i = 0; i < n; i++) {
+        const uint16_t c = buf[i];
+        buf[i] = (uint16_t)((c >> 8) | (c << 8));
+    }
+
     xSemaphoreTake(s_flush_done, 0);   /* 清掉可能残留的旧信号 */
     esp_lcd_panel_draw_bitmap(s_panel, x0, y0, x1, y1, buf);
     wait_flush();
@@ -507,8 +516,67 @@ void display_draw_ring(int cx, int cy, int radius, int thickness,               
     }
 }
 
-uint16_t *display_band_buffer(void)
+void display_draw_arc(int cx, int cy, int radius, int thickness,
+                      int a0, int a1, uint16_t fg, uint16_t track, uint16_t bg)
 {
+    if (!s_panel || !s_strip || radius <= 0 || thickness <= 0 || a1 <= a0) {
+        return;
+    }
+
+    const int r_in = (radius - thickness > 0) ? (radius - thickness) : 0;
+    const int r_out2 = radius * radius;
+    const int r_in2 = r_in * r_in;
+
+    /* 扇形包围盒：沿角度采样外圈端点，再按环宽外扩 */
+    int minx = cx, maxx = cx, miny = cy, maxy = cy;
+    for (int a = a0; a <= a1; a += 2) {
+        const float rad = (float)a * 3.14159265f / 180.0f;
+        const int x = cx + (int)(sinf(rad) * (float)radius);
+        const int y = cy - (int)(cosf(rad) * (float)radius);
+        if (x < minx) minx = x;
+        if (x > maxx) maxx = x;
+        if (y < miny) miny = y;
+        if (y > maxy) maxy = y;
+    }
+    minx -= thickness;
+    maxx += thickness;
+    miny -= thickness;
+    maxy += thickness;
+
+    int x0 = (minx < 0) ? 0 : minx;
+    int y0 = (miny < 0) ? 0 : miny;
+    int x1 = (maxx + 1 > LCD_H_RES) ? LCD_H_RES : maxx + 1;
+    int y1 = (maxy + 1 > LCD_V_RES) ? LCD_V_RES : maxy + 1;
+    if (x0 >= x1 || y0 >= y1) {
+        return;
+    }
+
+    for (int yy = y0; yy < y1; yy += LINE_CHUNK) {
+        const int lines = ((y1 - yy) < LINE_CHUNK) ? (y1 - yy) : LINE_CHUNK;
+        uint16_t *p = s_strip;
+
+        for (int sy = yy; sy < yy + lines; sy++) {
+            const int dy = sy - cy;
+            for (int sx = x0; sx < x1; sx++) {
+                const int dx = sx - cx;
+                const int d2 = dx * dx + dy * dy;
+                uint16_t color = bg;
+
+                if (d2 <= r_out2 && d2 >= r_in2) {
+                    float deg = atan2f((float)dx, (float)(-dy)) * 57.29578f;
+                    if (deg < 0.0f) {
+                        deg += 360.0f;
+                    }
+                    color = (deg >= (float)a0 && deg < (float)a1) ? fg : track;
+                }
+                *p++ = color;
+            }
+        }
+        push_bitmap(x0, yy, x1, yy + lines, s_strip);
+    }
+}
+
+uint16_t *display_band_buffer(void){
     return s_strip;
 }
 

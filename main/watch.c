@@ -191,6 +191,16 @@ static void format_battery(char *buf, size_t len)
     }
 }
 
+/* 电池行统一从这里画，避免不同调用点用不同 y 导致重影 */
+static void draw_battery_line(int y)
+{
+    char buf[32];
+
+    format_battery(buf, sizeof(buf));
+    display_fill_rect(0, y - 6, LCD_H_RES, 22, COLOR_BLACK);
+    text_center(y, buf, 1, COLOR_GRAY);
+}
+
 /* ---------------- 各表盘 ---------------- */
 
 /* ---- 指针表盘：全部在一个行缓冲里合成，避免指针互相擦除 ---- */
@@ -256,8 +266,8 @@ static void draw_analog(const rtc_time_t *t)
     const int ro = RING_R;
     const int ri = RING_R - RING_W;
 
-    for (int y = 0; y < LCD_V_RES; y += LINE_CHUNK) {
-        const int lines = ((LCD_V_RES - y) < LINE_CHUNK) ? (LCD_V_RES - y) : LINE_CHUNK;
+    for (int y = 0; y < LCD_V_RES; y += DISPLAY_BAND_LINES) {
+        const int lines = ((LCD_V_RES - y) < DISPLAY_BAND_LINES) ? (LCD_V_RES - y) : DISPLAY_BAND_LINES;
         uint16_t *buf = display_band_buffer();
 
         /* 背景 + 秒环 */
@@ -316,24 +326,13 @@ static void draw_analog(const rtc_time_t *t)
     text_center(298, buf, 1, COLOR_GRAY);
 }
 
-static void classic_ring(const rtc_time_t *t)
-{
-    display_draw_ring(RING_CX, RING_CY, RING_R, RING_W,
-                      0, t->second * 6, COLOR_GREEN, COLOR_TRACK, COLOR_BLACK);
-}
+static int s_ring_prev_sec = -1;
 
-static void draw_classic(const rtc_time_t *t, bool full)
+static void classic_text(const rtc_time_t *t, bool with_ampm)
 {
     char buf[32];
 
-    if (full) {
-        display_clear(COLOR_BLACK);
-    }
-
-    /* 圆环会把整个圆形包围盒刷成背景色，所以每一帧都要重画所有文字 */
-    classic_ring(t);
-
-    if (!s_h24) {
+    if (with_ampm && !s_h24) {
         text_center(112, (t->hour < 12) ? "上午" : "下午", 1, COLOR_GRAY);
     }
 
@@ -345,8 +344,43 @@ static void draw_classic(const rtc_time_t *t, bool full)
 
     text_center(258, WEEK_CN[t->weekday % 7], 1, COLOR_GRAY);
 
-    format_battery(buf, sizeof(buf));
-    text_center(300, buf, 1, COLOR_GRAY);
+    draw_battery_line(310);
+}
+
+static void draw_classic(const rtc_time_t *t, bool full)
+{
+    if (!full) {
+        return;
+    }
+
+    display_clear(COLOR_BLACK);
+    display_draw_ring(RING_CX, RING_CY, RING_R, RING_W, 0, t->second * 6,
+                      COLOR_GREEN, COLOR_TRACK, COLOR_BLACK);
+    s_ring_prev_sec = t->second;
+    classic_text(t, true);
+}
+
+/* 秒环增量刷新；文字每秒重画一次，保证任何时候都是完整的 */
+static void classic_tick(const rtc_time_t *t, bool minute_changed, bool day_changed)
+{
+    (void)minute_changed;
+    (void)day_changed;
+
+    const bool need_full_ring = (s_ring_prev_sec < 0) || (t->second < s_ring_prev_sec) ||
+                                (t->second - s_ring_prev_sec > 10);
+
+    if (need_full_ring) {
+        display_draw_ring(RING_CX, RING_CY, RING_R, RING_W, 0, t->second * 6,
+                          COLOR_GREEN, COLOR_TRACK, COLOR_BLACK);
+    } else if (t->second != s_ring_prev_sec) {
+        display_draw_arc(RING_CX, RING_CY, RING_R, RING_W,
+                         s_ring_prev_sec * 6, t->second * 6,
+                         COLOR_GREEN, COLOR_TRACK, COLOR_BLACK);
+    }
+    s_ring_prev_sec = t->second;
+
+    /* 文字每秒重画：成本小（约 25KB），但能保证不会长时间停留在缺损状态 */
+    classic_text(t, true);
 }
 
 static void draw_minimal(const rtc_time_t *t, bool full)
@@ -366,8 +400,7 @@ static void draw_minimal(const rtc_time_t *t, bool full)
         snprintf(buf, sizeof(buf), "%d 秒", t->second);
         text_center(232, buf, 2, COLOR_GREEN);
 
-        format_battery(buf, sizeof(buf));
-        text_center(300, buf, 1, COLOR_GRAY);
+        draw_battery_line(300);
     }
 }
 
@@ -445,8 +478,7 @@ static void render_tick(const rtc_time_t *t, bool minute_changed, bool day_chang
         draw_analog(t);
         break;
     case FACE_CLASSIC:
-        /* 圆环重绘会擦掉一切，所以整帧重画 */
-        draw_classic(t, false);
+        classic_tick(t, minute_changed, day_changed);
         break;
 
     case FACE_MINIMAL:
@@ -505,11 +537,10 @@ static void watch_task(void *arg)
         if (bq27220_present() && (now_us - last_batt_us > 5000000)) {
             last_batt_us = now_us;
             bq27220_read(&s_soc, &s_mv);
-            if (s_face != FACE_INFO) {
-                char b[32];
-                format_battery(b, sizeof(b));
-                display_fill_rect(0, 304, LCD_H_RES, 22, COLOR_BLACK);
-                text_center(310, b, 1, COLOR_GRAY);
+            if (s_face == FACE_CLASSIC) {
+                draw_battery_line(310);
+            } else if (s_face == FACE_MINIMAL) {
+                draw_battery_line(300);
             }
         }
 

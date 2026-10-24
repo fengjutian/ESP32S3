@@ -17,7 +17,7 @@
 #include "esp_lcd_touch_cst816s.h"
 
 #include "board_i2c.h"
-#include "display_config.h"
+#include "board_config.h"
 
 static const char *TAG = "touch";
 

@@ -1,24 +1,26 @@
 /*
- * SPDX-FileCopyrightText: 2010-2022 Espressif Systems (Shanghai) CO LTD
+ * 应用入口：初始化各外设，启动表盘与后台联网任务。
  *
  * SPDX-License-Identifier: CC0-1.0
  */
 
-#include <stdio.h>
 #include <inttypes.h>
-#include "sdkconfig.h"
+#include <stdio.h>
+
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+
 #include "esp_chip_info.h"
 #include "esp_flash.h"
-#include "esp_system.h"
 #include "esp_log.h"
+#include "esp_system.h"
 #include "nvs_flash.h"
+#include "sdkconfig.h"
 
+#include "board_config.h"
 #include "board_i2c.h"
 #include "bq27220.h"
 #include "display.h"
-#include "display_config.h"
 #include "rtc.h"
 #include "touch.h"
 #include "watch.h"
@@ -27,14 +29,12 @@
 
 static const char *TAG = "app";
 
-void app_main(void)
+static void log_chip_info(void)
 {
-    printf("Hello world!\n");
-
-    /* Print chip information */
     esp_chip_info_t chip_info;
-    uint32_t flash_size;
     esp_chip_info(&chip_info);
+
+    printf("Hello world!\n");
     printf("This is %s chip with %d CPU core(s), %s%s%s%s, ",
            CONFIG_IDF_TARGET,
            chip_info.cores,
@@ -43,16 +43,20 @@ void app_main(void)
            (chip_info.features & CHIP_FEATURE_BLE) ? "BLE" : "",
            (chip_info.features & CHIP_FEATURE_IEEE802154) ? ", 802.15.4 (Zigbee/Thread)" : "");
 
-    unsigned major_rev = chip_info.revision / 100;
-    unsigned minor_rev = chip_info.revision % 100;
-    printf("silicon revision v%d.%d, ", major_rev, minor_rev);
-    if(esp_flash_get_size(NULL, &flash_size) != ESP_OK) {
-        printf("Get flash size failed");
-        return;
-    }
+    printf("silicon revision v%u.%u, ", chip_info.revision / 100, chip_info.revision % 100);
 
-    printf("%" PRIu32 "MB %s flash\n", flash_size / (uint32_t)(1024 * 1024),
-           (chip_info.features & CHIP_FEATURE_EMB_FLASH) ? "embedded" : "external");
+    uint32_t flash_size = 0;
+    if (esp_flash_get_size(NULL, &flash_size) == ESP_OK) {
+        printf("%" PRIu32 "MB %s flash\n", flash_size / (uint32_t)(1024 * 1024),
+               (chip_info.features & CHIP_FEATURE_EMB_FLASH) ? "embedded" : "external");
+    } else {
+        printf("flash size unknown\n");
+    }
+}
+
+void app_main(void)
+{
+    log_chip_info();
 
     /* NVS 是 WiFi 的前提 */
     esp_err_t nvs = nvs_flash_init();
@@ -64,19 +68,17 @@ void app_main(void)
         ESP_LOGW(TAG, "nvs init failed: %s", esp_err_to_name(nvs));
     }
 
-    /* 屏幕 */
     if (display_init() != ESP_OK) {
-        printf("LCD init failed - check main/display_config.h\n");
+        ESP_LOGE(TAG, "LCD init failed - check main/board_config.h");
         return;
     }
 
-    /* I2C 总线：触摸 / RTC / 电量计共用 */
     if (board_i2c_init() != ESP_OK) {
-        printf("I2C bus init failed\n");
+        ESP_LOGW(TAG, "I2C bus init failed");
     }
 
     if (pcf85063_init() != ESP_OK) {
-        ESP_LOGW(TAG, "RTC unavailable, using build-time clock");
+        ESP_LOGW(TAG, "RTC unavailable");
     }
 
     if (bq27220_init() != ESP_OK) {
@@ -87,10 +89,7 @@ void app_main(void)
         ESP_LOGW(TAG, "touch unavailable");
     }
 
-    /* 表盘 */
-    watch_app_start();
-
-    /* 天气缓存 + 后台联网（校时、拉天气） */
     weather_init();
+    watch_app_start();
     time_sync_start();
 }

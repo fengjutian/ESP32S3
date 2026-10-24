@@ -9,7 +9,7 @@
 #include "esp_check.h"
 #include "esp_log.h"
 
-#include "display_config.h"
+#include "board_config.h"
 
 static const char *TAG = "i2c";
 

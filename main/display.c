@@ -26,7 +26,7 @@
 #include "esp_log.h"
 
 #include "display.h"
-#include "display_config.h"
+#include "board_config.h"
 #include "font8x16.h"
 #include "font16x16_zh.h"
 #include "st77916_init_cmds.h"

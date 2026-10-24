@@ -22,9 +22,11 @@
 #include "bq27220.h"
 #include "display.h"
 #include "imu.h"
+#include "net_link.h"
 #include "pedometer.h"
 #include "rtc.h"
 #include "touch.h"
+#include "voice_ai.h"
 #include "watch.h"
 #include "weather.h"
 #include "wifi_time.h"
@@ -70,6 +72,11 @@ void app_main(void)
         ESP_LOGW(TAG, "nvs init failed: %s", esp_err_to_name(nvs));
     }
 
+    /* WiFi 全局只初始化一次，联网任务和语音任务共用 */
+    if (net_link_init() != ESP_OK) {
+        ESP_LOGE(TAG, "net init failed, online features disabled");
+    }
+
     if (display_init() != ESP_OK) {
         ESP_LOGE(TAG, "LCD init failed - check main/board_config.h");
         return;
@@ -89,12 +96,17 @@ void app_main(void)
 
     if (imu_init() != ESP_OK) {
         ESP_LOGW(TAG, "IMU unavailable (pedometer disabled)");
+    } else {
+        imu_dump_registers();
     }
     pedometer_init();
 
     if (touch_init() != ESP_OK) {
         ESP_LOGW(TAG, "touch unavailable");
     }
+
+    /* 语音问答：初始化 I2S + ES8311/ES7210，并起后台任务 */
+    voice_ai_init();
 
     weather_init();
     watch_app_start();

@@ -24,6 +24,9 @@ void snake_turn(int dx, int dy);
 /** @brief 命中方向键则转向，返回是否命中。 */
 bool snake_tap_at(int x, int y);
 
+/** @brief 命中右上角「退出」按钮返回 true（表盘任务据此切走）。 */
+bool snake_exit_hit(int x, int y);
+
 /** @brief 暂停/继续。 */
 void snake_toggle_pause(void);
 

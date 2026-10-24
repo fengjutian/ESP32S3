@@ -116,6 +116,54 @@ bool imu_present(void)
     return s_present;
 }
 
+void imu_dump_registers(void)
+{
+    if (!s_present) {
+        return;
+    }
+
+    uint8_t buf[128];
+    if (reg_read(0x00, buf, sizeof(buf)) != ESP_OK) {
+        ESP_LOGW(TAG, "register dump failed");
+        return;
+    }
+
+    for (int row = 0; row < 8; row++) {
+        const int base = row * 16;
+        char line[96];
+        int used = snprintf(line, sizeof(line), "%02X:", base);
+        for (int i = 0; i < 16 && used < (int)sizeof(line) - 4; i++) {
+            used += snprintf(line + used, sizeof(line) - used, " %02X", buf[base + i]);
+        }
+        ESP_LOGI(TAG, "%s", line);
+    }
+}
+
+void imu_log_step_candidates(int soft_steps)
+{
+    if (!s_present) {
+        return;
+    }
+
+    uint8_t buf[16];
+    if (reg_read(0x58, buf, sizeof(buf)) != ESP_OK) {
+        return;
+    }
+
+    float ax = 0, ay = 0, az = 0;
+    imu_read_accel(&ax, &ay, &az);
+
+    uint8_t raw[6] = {0};
+    reg_read(REG_AX_L, raw, sizeof(raw));
+
+    ESP_LOGI(TAG, "accel %+.3f %+.3f %+.3f g | raw %02X%02X %02X%02X %02X%02X | soft=%d",
+             (double)ax, (double)ay, (double)az,
+             raw[1], raw[0], raw[3], raw[2], raw[5], raw[4], soft_steps);
+
+    ESP_LOGI(TAG, "58:%02X %02X %02X %02X | 60:%02X %02X %02X %02X",
+             buf[0], buf[1], buf[2], buf[3], buf[8], buf[9], buf[10], buf[11]);
+}
+
 esp_err_t imu_read_accel(float *ax, float *ay, float *az)
 {
     if (!s_present) {

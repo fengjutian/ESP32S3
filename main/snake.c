@@ -59,6 +59,12 @@ static const button_t s_buttons[4] = {
     {290, 157, 64, 46,  1,  0, "→"},
 };
 
+/* 右上角常驻「退出」键：不依赖滑动/长按，保证任何状态下都能离开这一页 */
+#define EXIT_X  296
+#define EXIT_Y  2
+#define EXIT_W  58
+#define EXIT_H  18
+
 static cell_t s_body[GRID * GRID];   /* index 0 = 蛇头 */
 static int s_len;
 static int8_t s_dx, s_dy;            /* 当前方向 */
@@ -146,6 +152,13 @@ static void draw_hud(void)
         snprintf(buf, sizeof(buf), "得分 %d   最高 %d", s_score, s_best);
     }
     ui_text_center(2, buf, 1, COLOR_WHITE);
+
+    /* 右上角「退出」：任何状态都能点走，不依赖滑动 */
+    display_fill_rect(EXIT_X, EXIT_Y, EXIT_W, EXIT_H, 0x4208);
+    display_fill_rect(EXIT_X + 1, EXIT_Y + 1, EXIT_W - 2, EXIT_H - 2, 0x2104);
+    const int tw = display_text_width_utf8("退出", 1);
+    display_draw_text_utf8(EXIT_X + (EXIT_W - tw) / 2, EXIT_Y + 1,
+                           "退出", 1, COLOR_WHITE, 0x2104);
 }
 
 static void draw_game_over(void)
@@ -331,6 +344,12 @@ bool snake_tap_at(int x, int y)
     }
 
     return false;
+}
+
+bool snake_exit_hit(int x, int y)
+{
+    /* 绘制区只有 58x18，命中区放大到右上角一整块，手指好按 */
+    return x >= EXIT_X - 10 && x < LCD_H_RES && y >= 0 && y < EXIT_Y + EXIT_H + 18;
 }
 
 void snake_toggle_pause(void)

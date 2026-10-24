@@ -8,6 +8,10 @@ idf_component_register(
          "weather.c"
          "wifi_prov.c"
          "wifi_time.c"
+         "net_link.c"
+         "minimax.c"
+         "audio_io.c"
+         "voice_ai.c"
          "ui.c"
          "faces.c"
          "snake.c"
@@ -19,10 +23,12 @@ idf_component_register(
          esp_driver_gpio
          esp_driver_i2c
          esp_driver_ledc
+         esp_driver_i2s
          esp_timer
          espressif__esp_lcd_st77916
          espressif__esp_lcd_touch
          espressif__esp_lcd_touch_cst816s
+         espressif__esp_codec_dev
          esp_wifi
          esp_netif
          nvs_flash
@@ -32,4 +38,5 @@ idf_component_register(
          esp_http_server
          esp-tls
          mbedtls
+         heap
     INCLUDE_DIRS "")

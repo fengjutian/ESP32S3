@@ -19,3 +19,9 @@ bool imu_present(void);
  * @brief 读取加速度（单位 g）。
  */
 esp_err_t imu_read_accel(float *ax, float *ay, float *az);
+
+/** @brief 打印 0x00~0x7F 全部寄存器（调试用）。 */
+void imu_dump_registers(void);
+
+/** @brief 打印 0x58~0x67 候选计步寄存器（调试用），并带上软件计步值。 */
+void imu_log_step_candidates(int soft_steps);

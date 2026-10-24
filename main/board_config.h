@@ -66,3 +66,18 @@
  *    降到 100kHz 稳定。
  * ===================================================================== */
 #define BOARD_I2C_HZ            100000
+
+/* =====================================================================
+ * 6. 音频（ES8311 喇叭 + ES7210 双麦，共用一组 I2S 时钟）
+ *    原理图：MCLK=2 BCLK=48 LRCK=38 DIN=39 DOUT=47 PA=9
+ * ===================================================================== */
+#define AUDIO_I2S_PORT          I2S_NUM_0
+#define AUDIO_PIN_MCLK          2
+#define AUDIO_PIN_BCLK          48
+#define AUDIO_PIN_LRCK          38
+#define AUDIO_PIN_DOUT          47     /* ESP -> ES8311，播放 */
+#define AUDIO_PIN_DIN           39     /* ES7210 -> ESP，录音 */
+#define AUDIO_PIN_PA            9      /* 功放使能，高电平开 */
+
+#define AUDIO_I2C_ADDR_ES8311   0x30
+#define AUDIO_I2C_ADDR_ES7210   0x80

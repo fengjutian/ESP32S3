@@ -16,15 +16,18 @@
 
 #include "esp_timer.h"
 #include "esp_log.h"
+#include "esp_task_wdt.h"
 
 #include "bq27220.h"
 #include "display.h"
 #include "faces.h"
+#include "imu.h"
 #include "pedometer.h"
 #include "rtc.h"
 #include "snake.h"
 #include "touch.h"
 #include "ui.h"
+#include "voice_ai.h"
 #include "watch.h"
 #include "weather.h"
 #include "wifi_time.h"
@@ -251,6 +254,11 @@ static gesture_t gesture_feed(gesture_state_t *st, bool pressed_now, uint16_t x,
 
 /* ---------------- 主任务 ---------------- */
 
+/* AI 表盘：按住说话，松手发送（表盘任务只做手势判定） */
+static bool s_ai_pressed;
+static int64_t s_ai_press_us;
+static face_t s_ai_last_face = FACE_COUNT;
+
 static void watch_task(void *arg)
 {
     (void)arg;
@@ -268,11 +276,19 @@ static void watch_task(void *arg)
 
     clock_from_build_time();
 
+    /* 看门狗：主循环只要卡住超过 TWDT 超时（默认 5s）就自动重启，
+     * 避免屏幕停在最后一帧、点什么都没反应。 */
+    const bool wdt_ok = (esp_task_wdt_add(NULL) == ESP_OK);
+
     if (bq27220_present()) {
         bq27220_read(&ui_soc, &ui_mv);
     }
 
     for (;;) {
+        if (wdt_ok) {
+            esp_task_wdt_reset();
+        }
+
         if (s_msg_mode) {
             /* 提示页不锁界面：碰一下就退回表盘，后台任务继续跑 */
             touch_point_t p;
@@ -306,6 +322,13 @@ static void watch_task(void *arg)
             }
         }
 
+        /* 临时调试：每 3 秒打印 IMU 候选计步寄存器 */
+        static int64_t last_probe_us;
+        if (now_us - last_probe_us > 3000000) {
+            last_probe_us = now_us;
+            imu_log_step_candidates(pedometer_steps());
+        }
+
         const bool sec_changed = (now.second != last_second);
         const bool min_changed = (now.minute != last_minute);
         const bool day_changed = (now.day != last_day);
@@ -334,8 +357,9 @@ static void watch_task(void *arg)
             snake_poll();
         }
 
-        /* 触摸手势 */
-        touch_point_t pt;
+        /* 触摸手势；pt 用 static 保存最后一次按下的坐标，
+         * 抬手那一拍 touch_read 不写坐标，用未初始化的栈值会误判点按位置。 */
+        static touch_point_t pt;
         const bool pressed_now = touch_read(&pt);
         const gesture_t gesture = gesture_feed(&touch, pressed_now, pt.x, pt.y);
 
@@ -343,15 +367,25 @@ static void watch_task(void *arg)
         if (ui_face == FACE_SNAKE) {
             switch (gesture) {
             case GESTURE_TAP:
-                if (snake_tap_at(pt.x, pt.y)) {
-                    break;              /* 点中方向键 */
+                /* 1. 右上角「退出」优先，任何状态都能走 */
+                if (snake_exit_hit(pt.x, pt.y)) {
+                    ui_face = (face_t)((ui_face + 1) % FACE_COUNT);
+                    ESP_LOGI(TAG, "snake: exit button -> %s", ui_face_name[ui_face]);
+                    face_render(ui_face, &now, true);
+                    break;
                 }
+                /* 2. 结束态：任意点按都重开（以前只有棋盘中心点得动） */
                 if (snake_is_over()) {
                     ESP_LOGI(TAG, "snake: restart");
                     snake_start();
-                } else {
-                    snake_toggle_pause();
+                    break;
                 }
+                /* 3. 方向键 */
+                if (snake_tap_at(pt.x, pt.y)) {
+                    break;
+                }
+                /* 4. 棋盘内轻触 = 暂停/继续 */
+                snake_toggle_pause();
                 break;
 
             case GESTURE_SWIPE_LEFT:
@@ -366,6 +400,34 @@ static void watch_task(void *arg)
 
             default:
                 break;
+            }
+        } else if (ui_face == FACE_AI) {
+            /* 进入 AI 表盘时手指可能还按着，别把它当成一次录音 */
+            if (s_ai_last_face != FACE_AI) {
+                s_ai_pressed = pressed_now;
+            }
+
+            if (pressed_now && !s_ai_pressed) {
+                s_ai_pressed = true;
+                s_ai_press_us = esp_timer_get_time();
+                voice_ai_ptt_press();
+            } else if (!pressed_now && s_ai_pressed) {
+                s_ai_pressed = false;
+                const int64_t held_ms = (esp_timer_get_time() - s_ai_press_us) / 1000;
+                /* 按不到 0.35 秒当误触：取消录音，若手里有上一轮回答就重播 */
+                voice_ai_ptt_release(held_ms < 350);
+            }
+
+            if (gesture == GESTURE_SWIPE_LEFT || gesture == GESTURE_SWIPE_RIGHT) {
+                voice_ai_cancel();
+                s_ai_pressed = false;
+                ui_face = (gesture == GESTURE_SWIPE_LEFT)
+                              ? (face_t)((ui_face + 1) % FACE_COUNT)
+                              : (face_t)((ui_face + FACE_COUNT - 1) % FACE_COUNT);
+                ESP_LOGI(TAG, "leave ai -> %s", ui_face_name[ui_face]);
+                face_render(ui_face, &now, true);
+            } else {
+                voice_ai_render(&now);
             }
         } else {
             switch (gesture) {
@@ -399,6 +461,8 @@ static void watch_task(void *arg)
                 break;
             }
         }
+
+        s_ai_last_face = ui_face;
 
         /* 30 秒无操作 → 降亮度 */
         if (pressed_now) {

@@ -21,6 +21,7 @@
 #include "pedometer.h"
 #include "snake.h"
 #include "ui.h"
+#include "voice_ai.h"
 #include "weather.h"
 #include "wifi_prov.h"
 
@@ -542,6 +543,10 @@ void face_render(face_t face, const rtc_time_t *t, bool full)
         break;
     case FACE_STEPS:
         steps_render(t);
+        break;
+    case FACE_AI:
+        voice_ai_invalidate();
+        voice_ai_render(t);
         break;
     default:
         break;

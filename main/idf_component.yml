@@ -17,3 +17,5 @@ dependencies:
   espressif/esp_lcd_st77916: ^2.0.2
   espressif/esp_lcd_touch: '*'
   espressif/esp_lcd_touch_cst816s: '*'
+  # 语音问答：ES8311（喇叭）+ ES7210（麦克风）编解码驱动，含 I2S/I2C 抽象
+  espressif/esp_codec_dev: '*'

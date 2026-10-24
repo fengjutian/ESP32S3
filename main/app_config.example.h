@@ -29,3 +29,19 @@
 
 /* 0 = 正常；1 = 强制每次开机都进配网（测试用） */
 #define APP_FORCE_PROVISION     0
+
+/* =====================================================================
+ * AI 语音问答（MiniMax）
+ *
+ * 1. 去 https://platform.minimax.io 注册，拿到 API Key
+ * 2. 把 key 填到 MINIMAX_API_KEY
+ * 3. 国内账号把 BASE_URL 改成 https://api.minimax.cn
+ *
+ * 可选参数（模型、音色、录音时长、麦克风增益等）见 main/ai_config.h，
+ * 在那里面用同样的 #define 覆盖即可。
+ * ===================================================================== */
+#define MINIMAX_API_KEY         ""
+#define MINIMAX_BASE_URL        "https://api.minimax.io"
+
+/* 语音合成音色，可换成 male-qn-qingse / female-shaonv / female-yujie 等 */
+#define MINIMAX_TTS_VOICE       "Chinese (Mandarin)_Lyrical_Voice"

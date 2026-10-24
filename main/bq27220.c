@@ -39,7 +39,7 @@ static esp_err_t read_word(uint16_t cmd, uint16_t *value)
 esp_err_t bq27220_init(void)
 {
     ESP_RETURN_ON_ERROR(board_i2c_init(), TAG, "board i2c init failed");
-    ESP_RETURN_ON_ERROR(board_i2c_add_device(BQ27220_ADDR, 400000, &s_dev),
+    ESP_RETURN_ON_ERROR(board_i2c_add_device(BQ27220_ADDR, BOARD_I2C_HZ, &s_dev),
                         TAG, "add BQ27220 failed");
 
     uint16_t mv = 0;

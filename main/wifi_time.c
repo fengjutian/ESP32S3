@@ -22,6 +22,7 @@
 
 #include "app_config.h"
 #include "rtc.h"
+#include "watch.h"
 #include "wifi_time.h"
 
 static const char *TAG = "time_sync";
@@ -162,6 +163,9 @@ static void time_sync_task(void *arg)
         const time_t epoch = time(NULL);
         struct tm local;
         localtime_r(&epoch, &local);
+
+        /* 表盘的软件时钟直接对准到校时结果 */
+        watch_set_time(epoch);
 
         rtc_time_t t = {
             .year = local.tm_year + 1900,

@@ -10,6 +10,8 @@
 #include "esp_err.h"
 #include "driver/i2c_master.h"
 
+#include "display_config.h"   /* 总线引脚与速率（BOARD_I2C_HZ） */
+
 /**
  * @brief 初始化板载 I2C 总线（重复调用安全）。
  */

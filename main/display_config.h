@@ -59,7 +59,11 @@
 #define TOUCH_PIN_RST           1
 #define TOUCH_PIN_INT           4
 #define TOUCH_I2C_ADDR          0x15
-#define TOUCH_I2C_HZ            400000
+
+/* 板载 I2C 总线速率。总线上挂了触摸/RTC/电量计/IMU/音频共 6 个器件，
+ * 400kHz 会出现偶发位错误（年份、小时读错），降到 100kHz 稳定。 */
+#define BOARD_I2C_HZ            100000
+#define TOUCH_I2C_HZ            BOARD_I2C_HZ
 
 /* 触摸坐标和屏幕方向对不上时改这里 */
 #define TOUCH_SWAP_XY           0

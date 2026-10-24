@@ -457,8 +457,7 @@ int display_text_width_utf8(const char *text, uint8_t scale)
     return w;
 }
 
-void display_draw_ring(int cx, int cy, int radius, int thickness,
-                       int start_deg, int end_deg,
+void display_draw_ring(int cx, int cy, int radius, int thickness,                       int start_deg, int end_deg,
                        uint16_t fg, uint16_t track, uint16_t bg)
 {
     if (!s_panel || !s_strip || radius <= 0 || thickness <= 0) {
@@ -506,4 +505,21 @@ void display_draw_ring(int cx, int cy, int radius, int thickness,
         }
         push_bitmap(x0, yy, x1, yy + lines, s_strip);
     }
+}
+
+uint16_t *display_band_buffer(void)
+{
+    return s_strip;
+}
+
+void display_band_push(int x0, int y, int w, int lines)
+{
+    if (!s_panel || !s_strip || w <= 0 || lines <= 0) {
+        return;
+    }
+    if (x0 < 0 || y < 0 || x0 + w > LCD_H_RES || y + lines > LCD_V_RES ||
+        w > LCD_H_RES || lines > LINE_CHUNK) {
+        return;
+    }
+    push_bitmap(x0, y, x0 + w, y + lines, s_strip);
 }

@@ -86,3 +86,21 @@ void display_draw_ring(int cx, int cy, int radius, int thickness,
                        int start_deg, int end_deg,
                        uint16_t fg, uint16_t track, uint16_t bg);
 
+/**
+ * @brief 取内部行缓冲，用于应用层自行合成画面。
+ *
+ * 缓冲容量为 LCD_H_RES × LINE_CHUNK 个像素（LINE_CHUNK = 16）。
+ * 用法：逐块填充后调用 display_band_push() 刷新到屏幕。
+ */
+uint16_t *display_band_buffer(void);
+
+/**
+ * @brief 把行缓冲推送到屏幕。
+ *
+ * @param x0    起始 x
+ * @param y     起始 y
+ * @param w     宽度（像素，≤ LCD_H_RES）
+ * @param lines 行数（≤ 16）
+ */
+void display_band_push(int x0, int y, int w, int lines);
+

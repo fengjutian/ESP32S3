@@ -1,9 +1,9 @@
 /*
  * PCF85063 实时时钟驱动。
  *
- * 寄存器：
- *   0x00 Control_1  0x01 Control_2  0x02 Seconds(bit7=OS)  0x03 Minutes
- *   0x04 Hours(bit6=12/24)  0x05 Days(weekday)  0x06 Date  0x07 Month(bit7=century)  0x08 Years
+ * 注意：这块板（ESP32-S3-Touch-LCD-1.85B）上的 RTC 实测行为不标准——
+ * 年份寄存器 0x08 写不进去、小时偶发读错。因此表盘不依赖 RTC 走时，
+ * 时间以 SNTP 校时 + 软件时钟为准；这里的读写仅作为可选的持久化备份。
  *
  * SPDX-License-Identifier: CC0-1.0
  */
@@ -50,7 +50,7 @@ int pcf85063_weekday(int year, int month, int day)
 esp_err_t pcf85063_init(void)
 {
     ESP_RETURN_ON_ERROR(board_i2c_init(), TAG, "board i2c init failed");
-    ESP_RETURN_ON_ERROR(board_i2c_add_device(PCF85063_ADDR, 400000, &s_dev),
+    ESP_RETURN_ON_ERROR(board_i2c_add_device(PCF85063_ADDR, BOARD_I2C_HZ, &s_dev),
                         TAG, "add PCF85063 failed");
 
     uint8_t reg = REG_CONTROL_1;
@@ -70,7 +70,7 @@ esp_err_t pcf85063_init(void)
         ESP_LOGW(TAG, "cleared STOP bit");
     }
 
-    ESP_LOGI(TAG, "PCF85063 ready at 0x%02X", PCF85063_ADDR);
+    ESP_LOGI(TAG, "PCF85063 ready at 0x%02X (仅作备份，时间以 SNTP 为准)", PCF85063_ADDR);
     return ESP_OK;
 }
 
@@ -91,8 +91,6 @@ esp_err_t pcf85063_read(rtc_time_t *t)
                         TAG, "read time failed");
 
     if (b[0] & BIT_OS) {
-        ESP_LOGW(TAG, "OS flag set, raw: %02X %02X %02X %02X %02X %02X %02X",
-                 b[0], b[1], b[2], b[3], b[4], b[5], b[6]);
         return ESP_ERR_INVALID_STATE;   /* 掉过电，时间不可信 */
     }
 

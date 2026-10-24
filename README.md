@@ -102,13 +102,20 @@ idf.py -p COM3 flash
 ### 烧录成功时的串口日志
 
 ```
-I (364) display: using init sequence v2 (185 commands)
-I (634) display: panel ready: 360x360 (ST77916 QSPI, v2)
-I (634) pcf85063: PCF85063 ready at 0x51
-I (634) bq27220: BQ27220 ready at 0x55, 4125 mV, 100%
-I (694) touch: CST816S ready at 0x15
-W (984) time_sync: no WiFi credentials in main/app_config.h, skipping sync
+I (761) pcf85063: PCF85063 ready at 0x51 (仅作备份，时间以 SNTP 为准)
+I (761) bq27220: BQ27220 ready at 0x55, 4122 mV, 100%
+I (821) touch: CST816S ready at 0x15
+I (1511) watch: now 2026-10-24 00:16:00
+I (4991) watch: clock set to 2026-10-24 00:16:24      ← SNTP 校准后
 ```
+
+### 时间来源
+
+1. 开机用固件的编译时间（`__DATE__` / `__TIME__`）兜底
+2. 约 5 秒后 WiFi + SNTP 校准，软件时钟对准到本地时间（`APP_TZ`）
+3. 之后由 `esp_timer` 累加计时
+
+RTC 仍会写入，但这块板上的 PCF85063 年份寄存器异常，**不读它**（详见第 5 节第 11 条）。
 
 ### 启用联网校时
 
@@ -209,6 +216,25 @@ int w = display_text_width("Hello World", 3);     // 计算宽度，便于居中
 
 7. **出厂固件已被覆盖。** 本工程烧写的是自己的 app 分区（0x10000 起），
    原厂 demo 界面不再存在；需要时用微雪的固件包重新烧写。
+
+8. **屏的可视区是圆形。** 面板是 360×360，但只有内切圆可见，四角被外壳遮住。
+   排版要收在半径 ~165 的圆内，否则日期/状态行会落到看不见的区域。
+
+9. **像素字节序必须显式设成 LITTLE。**
+   `esp_lcd_panel_dev_config_t.data_endian` 默认是 BIG，会导致所有颜色两个字节对调：
+   青色 → 黄色、灰色 → 深蓝、绿色 → 洋红（白色因为对称看不出来）。
+   在 [display.c](main/display.c) 里设 `.data_endian = LCD_RGB_DATA_ENDIAN_LITTLE` 后正常。
+
+10. **`display_draw_ring()` 会重绘整个圆形包围盒**（非环区域填背景色），
+    所以圆环之后必须重画所有文字，否则日期/星期会被每秒一次的圆环刷新擦掉。
+
+11. **这块板上的 RTC（PCF85063 @0x51）行为不标准**，不能作为时间来源：
+    - 年份寄存器 `0x08` 写不进去（写 `0x26`、`0x42` 都读回 `0x06`/`0x02`，清 OS 标志后重写同样无效）
+    - 偶发位错误（小时读到 `0x33`，或 00 读成 04）
+    - 100kHz 降速后依旧
+
+    因此表盘时间以 **SNTP 校时 + 软件时钟（`esp_timer`）** 为准，RTC 只做 best-effort 写入。
+    代价是断电后时间从编译时间重来，开机约 5 秒内自动校准。
 
 ---
 

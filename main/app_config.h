@@ -52,4 +52,4 @@
 #define MINIMAX_TTS_VOICE       "Chinese (Mandarin)_Lyrical_Voice"
 
 /* 开机自检：1 = 启动时跑一次对话 + 流式语音播报并打日志，平时保持 0 */
-#define AI_SELFTEST_ON_BOOT     1
+#define AI_SELFTEST_ON_BOOT     0

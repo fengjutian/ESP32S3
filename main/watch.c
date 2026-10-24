@@ -87,9 +87,11 @@ static void clock_from_build_time(void)
         }
     }
 
+    portENTER_CRITICAL(&s_time_mux);
     s_base_seconds = days_from_civil(year, month, (unsigned)day) * 86400
                    + hh * 3600 + mm * 60 + ss;
     s_base_boot_us = esp_timer_get_time();
+    portEXIT_CRITICAL(&s_time_mux);
 }
 
 static void clock_from_software(rtc_time_t *t)
@@ -125,9 +127,14 @@ static void clock_from_software(rtc_time_t *t)
  * 语音问答的本地意图（"现在几点"）直接用它，不走网络。 */
 void watch_get_time(rtc_time_t *out)
 {
-    if (out) {
-        clock_from_software(out);
+    if (!out) {
+        return;
     }
+    /* 表盘任务还没起来（开机头两秒）时自己先播种，避免返回 1970 年 */
+    if (s_base_boot_us == 0) {
+        clock_from_build_time();
+    }
+    clock_from_software(out);
 }
 
 void watch_set_time(time_t epoch){
@@ -159,6 +166,7 @@ void watch_show_message(const char *title, const char *line1, const char *line2,
 {
     s_msg_mode = true;
 
+    display_frame_begin();
     display_set_backlight(100);
     display_clear(COLOR_BLACK);
 
@@ -174,6 +182,7 @@ void watch_show_message(const char *title, const char *line1, const char *line2,
     if (line3) {
         ui_text_center(204, line3, 1, COLOR_GRAY);
     }
+    display_frame_end();
 }
 
 void watch_clear_message(void)
@@ -548,8 +557,10 @@ void watch_app_start(void)
      * 语音问答问"现在几点"也能拿到合理时间；SNTP 到了会再校准。 */
     clock_from_build_time();
 
+    display_frame_begin();
     display_clear(COLOR_BLACK);
     ui_text_center(160, "启动中...", 2, COLOR_GRAY);
+    display_frame_end();
 
     xTaskCreate(watch_task, "watch", 6144, NULL, 5, NULL);
 }

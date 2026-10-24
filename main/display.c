@@ -12,6 +12,7 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/task.h"
 
 #include "driver/gpio.h"
 #include "driver/ledc.h"
@@ -44,6 +45,15 @@ static esp_lcd_panel_handle_t s_panel;
 static SemaphoreHandle_t s_flush_done;
 static uint16_t *s_strip;   /* LINE_CHUNK 行 × 屏宽 的像素缓冲 */
 
+/* 整页离屏合成：切页时先画到 PSRAM 再整页推屏，避免清屏黑闪。
+ * 没有 PSRAM 时 s_fb 为 NULL，所有绘制直接走屏幕。 */
+static uint16_t *s_fb;
+static bool s_compose;
+static int s_frame_depth;
+static TaskHandle_t s_frame_owner;       /* 正在合成整页的任务，其它任务的局部刷新照旧直接刷屏 */
+static SemaphoreHandle_t s_frame_lock;   /* 整页合成互斥（可重入），避免两个任务同时画一帧 */
+static portMUX_TYPE s_frame_mux = portMUX_INITIALIZER_UNLOCKED;
+
 static esp_err_t backlight_init(void);
 
 static bool on_color_trans_done(esp_lcd_panel_io_handle_t io,
@@ -64,6 +74,22 @@ static void wait_flush(void)
 
 static void push_bitmap(int x0, int y0, int x1, int y1, const void *buf_in)
 {
+    /* 离屏合成阶段：只写帧缓冲，等 display_frame_end() 再整页推屏。
+     * 这里不做字节交换，推屏时统一交换一次。
+     * 只有发起合成的任务才写帧缓冲；别的任务此刻的局部刷新仍然直接刷屏，
+     * 不会被误画进这一帧里。 */
+    if (s_compose && s_fb && xTaskGetCurrentTaskHandle() == s_frame_owner) {
+        uint16_t *src = (uint16_t *)buf_in;
+        const int w = x1 - x0;
+        const int h = y1 - y0;
+        for (int r = 0; r < h; r++) {
+            memcpy(&s_fb[(size_t)(y0 + r) * LCD_H_RES + x0],
+                   src + (size_t)r * (size_t)w,
+                   (size_t)w * sizeof(uint16_t));
+        }
+        return;
+    }
+
     /* 面板初始化序列里的 0xC8 (RAMCTL) 固定了字节序，data_endian 会被覆盖，
      * 所以在这里统一做一次字节交换。所有绘制路径都经过这里。 */
     uint16_t *buf = (uint16_t *)buf_in;
@@ -134,6 +160,11 @@ esp_err_t display_init(void)
 
     s_flush_done = xSemaphoreCreateBinary();
     ESP_RETURN_ON_FALSE(s_flush_done, ESP_ERR_NO_MEM, TAG, "no memory for semaphore");
+
+    s_frame_lock = xSemaphoreCreateRecursiveMutex();
+    if (!s_frame_lock) {
+        ESP_LOGW(TAG, "no memory for frame lock, page framing disabled");
+    }
 
     esp_lcd_panel_io_spi_config_t io_cfg = {
         .cs_gpio_num = LCD_PIN_CS,
@@ -214,6 +245,17 @@ esp_err_t display_init(void)
 
     s_strip = heap_caps_malloc((size_t)LCD_H_RES * LINE_CHUNK * sizeof(uint16_t), MALLOC_CAP_DMA);
     ESP_RETURN_ON_FALSE(s_strip, ESP_ERR_NO_MEM, TAG, "no memory for strip buffer");
+
+    /* 整页帧缓冲放 PSRAM：360×360×2 ≈ 253 KB。分配失败就退回直接刷屏，
+     * 功能不受影响，只是切页仍会有黑闪。 */
+    s_fb = heap_caps_malloc((size_t)LCD_H_RES * LCD_V_RES * sizeof(uint16_t),
+                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (s_fb) {
+        ESP_LOGI(TAG, "page framebuffer: %u KB in PSRAM",
+                 (unsigned)((size_t)LCD_H_RES * LCD_V_RES * sizeof(uint16_t) / 1024));
+    } else {
+        ESP_LOGW(TAG, "no PSRAM for page framebuffer, page switches draw directly");
+    }
 
     ESP_RETURN_ON_ERROR(backlight_init(), TAG, "backlight init failed");
     display_set_backlight(100);
@@ -310,6 +352,51 @@ void display_fill_rect(int x, int y, int w, int h, uint16_t color)
 void display_clear(uint16_t color)
 {
     display_fill_rect(0, 0, LCD_H_RES, LCD_V_RES, color);
+}
+
+void display_frame_begin(void)
+{
+    if (!s_fb || !s_frame_lock) {
+        return;
+    }
+
+    /* 等到上一帧画完再开始，免得两个任务往同一块帧缓冲里交错写 */
+    xSemaphoreTakeRecursive(s_frame_lock, portMAX_DELAY);
+
+    portENTER_CRITICAL(&s_frame_mux);
+    if (s_frame_depth == 0) {
+        s_frame_owner = xTaskGetCurrentTaskHandle();
+    }
+    s_frame_depth++;
+    s_compose = true;
+    portEXIT_CRITICAL(&s_frame_mux);
+}
+
+void display_frame_end(void)
+{
+    if (!s_fb || !s_frame_lock) {
+        return;
+    }
+
+    bool flush = false;
+    portENTER_CRITICAL(&s_frame_mux);
+    if (s_frame_depth > 0 && --s_frame_depth == 0) {
+        s_compose = false;
+        s_frame_owner = NULL;
+        flush = true;
+    }
+    portEXIT_CRITICAL(&s_frame_mux);
+
+    if (flush) {
+        for (int y = 0; y < LCD_V_RES; y += LINE_CHUNK) {
+            const int lines = ((LCD_V_RES - y) < LINE_CHUNK) ? (LCD_V_RES - y) : LINE_CHUNK;
+            memcpy(s_strip, &s_fb[(size_t)y * LCD_H_RES],
+                   (size_t)LCD_H_RES * (size_t)lines * sizeof(uint16_t));
+            push_bitmap(0, y, LCD_H_RES, y + lines, s_strip);
+        }
+    }
+
+    xSemaphoreGiveRecursive(s_frame_lock);
 }
 
 int display_text_width(const char *text, uint8_t scale)

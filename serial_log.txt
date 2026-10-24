@@ -1,7 +1,7 @@
-I (163) esp_image: segment 1: paddr=0007647c vaddr=3fc9cc00 sizeESP-ROM:esp32s3-20210327
+ESP-ROM:esp32s3-20210327
 Build:Mar 27 2021
 rst:0x15 (USB_UART_CHIP_RESET),boot:0x2b (SPI_FAST_FLASH_BOOT)
-Saved PC:0x4037e9ca
+Saved PC:0x4201088f
 SPIWP:0xee
 mode:DIO, clock div:1
 load:0x3fce2820,len:0x14f0
@@ -23,12 +23,12 @@ I (56) boot:  0 nvs              WiFi data        01 02 00009000 00006000
 I (62) boot:  1 phy_init         RF data          01 01 0000f000 00001000
 I (69) boot:  2 factory          factory app      00 00 00010000 00400000
 I (75) boot: End of partition table
-I (79) esp_image: segment 0: paddr=00010020 vaddr=3c0d0020 size=66454h (418900) map
-I (163) esp_image: segment 1: paddr=0007647c vaddr=3fc9cc00 size=05f50h ( 24400) load
-I (168) esp_image: segment 2: paddr=0007c3d4 vaddr=40374000 size=03c44h ( 15428) load
-I (172) esp_image: segment 3: paddr=00080020 vaddr=42000020 size=ca020h (827424) map
-I (325) esp_image: segment 4: paddr=0014a048 vaddr=40377c44 size=14f10h ( 85776) load
-I (345) esp_image: segment 5: paddr=0015ef60 vaddr=50000000 size=00024h (    36) load
+I (79) esp_image: segment 0: paddr=00010020 vaddr=3c0d0020 size=66464h (418916) map
+I (163) esp_image: segment 1: paddr=0007648c vaddr=3fc9cc00 size=05f50h ( 24400) load
+I (168) esp_image: segment 2: paddr=0007c3e4 vaddr=40374000 size=03c34h ( 15412) load
+I (172) esp_image: segment 3: paddr=00080020 vaddr=42000020 size=ca060h (827488) map
+I (325) esp_image: segment 4: paddr=0014a088 vaddr=40377c34 size=14f20h ( 85792) load
+I (345) esp_image: segment 5: paddr=0015efb0 vaddr=50000000 size=00024h (    36) load
 I (356) boot: Loaded app from partition at offset 0x10000
 I (356) boot: Disabling RNG early entropy source...
 I (366) octal_psram: vendor id    : 0x0d (AP)
@@ -54,7 +54,7 @@ I (862) app_init: Application information:
 I (866) app_init: Project name:     hello_world
 I (871) app_init: App version:      499511c-dirty
 I (875) app_init: Compile time:     Oct 24 2026 15:29:12
-I (880) app_init: ELF file SHA256:  47aaf04aa...
+I (880) app_init: ELF file SHA256:  545f337da...
 I (884) app_init: ESP-IDF:          v6.1
 I (888) efuse_init: Min chip rev:     v0.0
 I (892) efuse_init: Max chip rev:     v0.99 
@@ -133,7 +133,7 @@ I (1973) ES7210: Enable ES7210_INPUT_MIC2
 E (1983) i2s_common: i2s_channel_disable(1516): the channel has not been enabled yet
 I (1983) I2S_IF: Paired data: 0x3fcc13c0, current mode: playback, paired in_enable: 0, paired out_enable: 0
 I (1993) I2S_IF: STD: TX, data_bit: 16, slot_bit: 16, ws_width: 16, slot_mode: STEREO, slot_mask: 0x3
-I (1993) I2S_IF: STD: TX, sample_rate_hz: 16000, mclk_multiple: 256, clk_src: 6
+I (2003) I2S_IF: STD: TX, sample_rate_hz: 16000, mclk_multiple: 256, clk_src: 6
 I (2023) Adev_Codec: Open codec device OK
 E (2023) i2s_common: i2s_channel_disable(1516): the channel has not been enabled yet
 I (2023) I2S_IF: Current mode(record) and peer mode have same sample_rate 16000, channel 2, bits_per_sample 16
@@ -145,59 +145,62 @@ I (2063) ES7210: Enable ES7210_INPUT_MIC2
 I (2073) ES7210: Unmuted
 I (2073) Adev_Codec: Open codec device OK
 I (2073) audio: ready (16kHz/16bit, ES8311 + ES7210)
-I (2073) voice: local[现在几点了] -> 现在是 0 点整。
-I (2073) voice: local[今天几号] -> 今天是 1 月 1 日，星期四。
+I (2073) voice: local[现在几点了] -> 现在是 19 点 20 分。
+I (2073) voice: local[今天几号] -> 今天是 10 月 24 日，星期六。
 I (2083) voice: local[今天天气怎么样] -> 天气还没拉到，联网后我再告诉你。
-I (2093) voice: local[还有多少电] -> (cloud)
-I (2093) voice: local[我走了多少步] -> 今天走了 61 步，目标是 8000 步。
+I (2093) voice: local[还有多少电] -> 电量暂时读不到。
+I (2103) voice: local[我走了多少步] -> 今天走了 61 步，目标是 8000 步。
 I (2103) voice: local[你是谁] -> 我是这块手表上的语音助手。
 I (2113) voice: local[谢谢] -> 不客气。
 I (2113) voice: local[讲个笑话] -> (cloud)
 I (2123) voice: ready (8 s max, 250 KB buffer)
 I (2123) phy_init: phy_version 712,87e8c20e,Apr 13 2026,18:51:10
-I (2163) wifi:mode : sta (44:bd:8d:78:0c:20)
-I (2163) wifi:enable tsf
-I (2163) netlink: connecting to "502"...
-I (2173) wifi:new:<6,0>, old:<1,0>, ap:<255,255>, sta:<6,0>, prof:1, snd_ch_cfg:0x0
+I (2173) wifi:mode : sta (44:bd:8d:78:0c:20)
+I (2173) wifi:enable tsf
+I (2173) netlink: connecting to "502"...
+I (2183) wifi:new:<6,0>, old:<1,0>, ap:<255,255>, sta:<6,0>, prof:1, snd_ch_cfg:0x0
 I (2183) wifi:state: init -> auth (0xb0)
-I (2443) main_task: Returned from app_main()
-I (2873) watch: now 2026-10-24 19:17:36
+I (2453) main_task: Returned from app_main()
+I (2883) watch: now 2026-10-24 19:20:54
 I (3183) wifi:state: auth -> init (0x200)
 W (3193) netlink: disconnected (reason 2), retry 1
-I (3933) imu: accel +0.029 +0.376 +0.840 g | raw 00FD 0C09 1AE4 | soft=61
-I (3933) imu: 58:00 00 00 00 | 60:00 00 00 00
+I (3943) imu: accel +0.028 +0.372 +0.847 g | raw 00D2 0BEF 1B1E | soft=61
+I (3943) imu: 58:00 00 00 00 | 60:00 00 00 00
 I (5493) wifi:state: init -> auth (0xb0)
 I (5503) wifi:state: auth -> assoc (0x0)
 I (5513) wifi:state: assoc -> run (0x10)
-I (5533) wifi:connected with 502, aid = 10, channel 6, BW20, bssid = 22:1b:7f:b6:1d:c2
-I (5533) wifi:security: WPA2-PSK, phy: bgn, rssi: -50, cipher(pairwise:0x3, group:0x3), pmf:0
-I (5543) wifi:pm start, type: 1
+I (5543) wifi:connected with 502, aid = 10, channel 6, BW20, bssid = 22:1b:7f:b6:1d:c2
+I (5543) wifi:security: WPA2-PSK, phy: bgn, rssi: -50, cipher(pairwise:0x3, group:0x3), pmf:0
+I (5553) wifi:pm start, type: 1
 
-I (5543) wifi:dp: 1, bi: 102400, li: 3, scale listen interval from 307200 us to 307200 us
+I (5553) wifi:dp: 1, bi: 102400, li: 3, scale listen interval from 307200 us to 307200 us
 I (5553) wifi:set rx beacon pti, rx_bcn_pti: 0, bcn_timeout: 25000, mt_pti: 0, mt_time: 10000
-I (5573) wifi:AP's beacon interval = 102400 us, DTIM period = 1
-I (6683) esp_netif_handlers: sta ip: 192.168.2.238, mask: 255.255.255.0, gw: 192.168.2.1
-I (6683) netlink: online
-I (6683) minimax: chat: 你好，用一句话证明你在工作
-I (6723) wifi:<ba-add>idx:0 (ifx:0, 22:1b:7f:b6:1d:c2), tid:0, ssn:1, winSize:64
-I (6913) esp-x509-crt-bundle: Certificate validated
-I (6943) imu: accel +0.029 +0.371 +0.848 g | raw 00EA 0BE3 1B26 | soft=61
-I (6943) imu: 58:00 00 00 00 | 60:00 00 00 00
-I (8763) minimax: answer: 我正在正常运行，随时可以帮你解决问题。
-I (8763) voice: selftest OK: 我正在正常运行，随时可以帮你解决问题。
-I (8783) minimax: tts stream: 我正在正常运行，随时可以帮你解决问题。
-I (9013) esp-x509-crt-bundle: Certificate validated
-I (9943) imu: accel +0.031 +0.373 +0.852 g | raw 00EA 0BE3 1B2D | soft=61
-I (9943) imu: 58:00 00 00 00 | 60:00 00 00 00
-I (10073) watch: clock set to 2026-10-24 19:18:55
-I (10073) net: time synced: 2026-10-24 19:18:55
-I (10133) voice: first pcm after 1370 ms
-I (10303) watch: now 2026-10-24 19:18:55
-I (11723) esp-x509-crt-bundle: Certificate validated
-I (12953) imu: accel +0.029 +0.371 +0.848 g | raw 00EE 0BE0 1B26 | soft=61
-I (12953) imu: 58:00 00 00 00 | 60:00 00 00 00
-I (13013) weather: 南京 18℃ 晴, 湿度 89%, 风 9km/h, 今日 15~21℃
-I (13013) net: next refresh in 30 min
-I (15263) minimax: tts stream 124830 bytes (3900 ms audio), took 6479 ms
-I (15333) watch: now 2026-10-24 19:19:00
-I (15413) voice: selftest tts=ESP_OK, 124830 bytes
+I (5563) wifi:AP's beacon interval = 102400 us, DTIM period = 1
+I (6773) esp_netif_handlers: sta ip: 192.168.2.238, mask: 255.255.255.0, gw: 192.168.2.1
+I (6773) netlink: online
+I (6773) minimax: chat: 你好，用一句话证明你在工作
+I (6813) wifi:<ba-add>idx:0 (ifx:0, 22:1b:7f:b6:1d:c2), tid:0, ssn:1, winSize:64
+I (7013) imu: accel +0.032 +0.372 +0.849 g | raw 00F7 0BD6 1B28 | soft=61
+I (7013) imu: 58:00 00 00 00 | 60:00 00 00 00
+I (7013) esp-x509-crt-bundle: Certificate validated
+I (8553) watch: now 2026-10-24 19:21:00
+I (9053) watch: clock set to 2026-10-24 19:21:33
+I (9053) net: time synced: 2026-10-24 19:21:33
+I (9983) imu: accel +0.030 +0.371 +0.844 g | raw 00F5 0BE3 1B01 | soft=61
+I (9983) imu: 58:00 00 00 00 | 60:00 00 00 00
+I (10903) minimax: answer: 我正在正常工作，已经收到你的消息并及时回应。
+I (10903) voice: selftest OK: 我正在正常工作，已经收到你的消息并及时回应。
+I (10923) minimax: tts stream: 我正在正常工作，已经收到你的消息并及时回应。
+I (11163) esp-x509-crt-bundle: Certificate validated
+I (12323) voice: first pcm after 1421 ms
+I (12993) imu: accel +0.028 +0.370 +0.845 g | raw 00E8 0CDB 1B30 | soft=61
+I (12993) imu: 58:00 00 00 00 | 60:00 00 00 00
+I (13723) esp-x509-crt-bundle: Certificate validated
+I (16003) imu: accel +0.027 +0.371 +0.848 g | raw 00D5 0BDE 1B19 | soft=61
+I (16003) imu: 58:00 00 00 00 | 60:00 00 00 00
+I (16123) weather: 南京 18℃ 晴, 湿度 89%, 风 9km/h, 今日 15~21℃
+I (16123) net: next refresh in 30 min
+I (18873) minimax: tts stream 156038 bytes (4876 ms audio), took 7954 ms
+I (19023) voice: selftest tts=ESP_OK, 156038 bytes
+I (19023) imu: accel +0.027 +0.374 +0.847 g | raw 00DC 0BF8 1B18 | soft=61
+I (19023) imu: 58:00 00 00 00 | 60:00 00 00 00

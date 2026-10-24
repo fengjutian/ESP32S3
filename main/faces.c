@@ -257,8 +257,8 @@ static void classic_render(const rtc_time_t *t)
     classic_text(t, true);
 }
 
-/* 秒环增量刷新；文字每秒重画一次，保证不会长时间停留缺损状态 */
-static void classic_tick(const rtc_time_t *t)
+/* 秒环增量刷新；文字只在分钟变化时重画（时间格式是 HH:MM，秒级不变）。 */
+static void classic_tick(const rtc_time_t *t, bool minute_changed)
 {
     const bool need_full_ring = (s_ring_prev_sec < 0) || (t->second < s_ring_prev_sec) ||
                                 (t->second - s_ring_prev_sec > 10);
@@ -273,7 +273,10 @@ static void classic_tick(const rtc_time_t *t)
     }
     s_ring_prev_sec = t->second;
 
-    classic_text(t, true);
+    if (need_full_ring || minute_changed) {
+        /* 整环重画会把圆内全部涂黑，文字必须跟着补回来 */
+        classic_text(t, true);
+    }
 }
 
 /* ================= 极简表盘（超大数字） ================= */
@@ -297,9 +300,16 @@ static void minimal_render(const rtc_time_t *t)
     ui_draw_battery_line(300);
 }
 
-static void minimal_tick(const rtc_time_t *t, bool day_changed)
+static void minimal_tick(const rtc_time_t *t, bool minute_changed, bool day_changed)
 {
-    char buf[24];
+    char buf[40];
+
+    /* 大字时间只在分钟变化时重画（以前这里漏了，时间会停在进入页面那一刻） */
+    if (minute_changed) {
+        display_fill_rect(0, 102, LCD_H_RES, 112, COLOR_BLACK);
+        ui_format_time(t, buf, sizeof(buf), ui_h24);
+        ui_text_center(112, buf, 6, COLOR_WHITE);
+    }
 
     display_fill_rect(0, 228, LCD_H_RES, 40, COLOR_BLACK);
     snprintf(buf, sizeof(buf), "%d 秒", t->second);
@@ -469,49 +479,108 @@ static void weather_render(const rtc_time_t *t)
     ui_text_center(300, buf, 1, COLOR_GRAY);
 }
 
+/* 分钟级刷新：只改顶部时间（和跨天时的日期），不整屏重画天气 */
+static void weather_tick(const rtc_time_t *t, bool minute_changed, bool day_changed)
+{
+    char buf[64];
+    char top[96];
+
+    if (!minute_changed) {
+        return;
+    }
+
+    ui_format_time(t, buf, sizeof(buf), true);
+    snprintf(top, sizeof(top), "%s  %s", WEATHER_CITY, buf);
+    display_fill_rect(0, 12, LCD_H_RES, 26, COLOR_BLACK);
+    ui_text_center(20, top, 1, COLOR_GRAY);
+
+    if (day_changed) {
+        display_fill_rect(0, 292, LCD_H_RES, 26, COLOR_BLACK);
+        snprintf(buf, sizeof(buf), "%d月%d日 %s", t->month, t->day,
+                 ui_week_cn[t->weekday % 7]);
+        ui_text_center(300, buf, 1, COLOR_GRAY);
+    }
+}
+
 /* ================= 计步表盘 ================= */
 
 static int s_steps_drawn = -1;
+static int s_ring_deg = -1;
+static int s_pct_drawn = -1;
+static int s_tenth_km_drawn = -1;
 
-static void steps_render(const rtc_time_t *t)
+/* 只擦居中文字占的那一条，不能整行填黑——进度环在左右两侧，
+ * 整行填会把环切掉。220px 是这一带仍在圆内的安全宽度。 */
+static void steps_patch_text(int y, const char *text, uint8_t scale, uint16_t fg)
+{
+    const int w = 220;
+    display_fill_rect((LCD_H_RES - w) / 2, y - 4, w, 16 * scale + 8, COLOR_BLACK);
+    ui_text_center(y, text, scale, fg);
+}
+
+/* full=true 整页重画；false 只更新步数、百分比、里程和新增的进度环扇形 */
+static void steps_render(const rtc_time_t *t, bool full)
 {
     char buf[40];
     const int steps = pedometer_steps();
     const int goal = pedometer_goal();
-
-    display_clear(COLOR_BLACK);
+    const int pct = (goal > 0) ? (steps * 100 / goal) : 0;
+    const int tenth_km = steps * 7 / 10000;   /* 步长按 0.7m 估算 */
 
     int deg = (goal > 0) ? (steps * 360 / goal) : 0;
     if (deg > 360) {
         deg = 360;
     }
-    display_draw_ring(UI_RING_CX, UI_RING_CY, UI_RING_R, UI_RING_W, 0, deg,
-                      COLOR_GREEN, UI_COLOR_TRACK, COLOR_BLACK);
 
-    ui_text_center(92, "今日步数", 1, COLOR_GRAY);
+    /* 步数归零 / 跨天：局部刷新处理不了，退回整页 */
+    if (!full && (s_ring_deg < 0 || deg < s_ring_deg)) {
+        full = true;
+    }
 
+    if (full) {
+        display_clear(COLOR_BLACK);
+        display_draw_ring(UI_RING_CX, UI_RING_CY, UI_RING_R, UI_RING_W, 0, deg,
+                          COLOR_GREEN, UI_COLOR_TRACK, COLOR_BLACK);
+        s_ring_deg = deg;
+
+        ui_text_center(92, "今日步数", 1, COLOR_GRAY);
+
+        snprintf(buf, sizeof(buf), "%d月%d日 %s", t->month, t->day,
+                 ui_week_cn[t->weekday % 7]);
+        ui_text_center(316, buf, 1, COLOR_GRAY);
+    } else if (deg > s_ring_deg) {
+        display_draw_arc(UI_RING_CX, UI_RING_CY, UI_RING_R, UI_RING_W,
+                         s_ring_deg, deg, COLOR_GREEN, UI_COLOR_TRACK, COLOR_BLACK);
+        s_ring_deg = deg;
+    }
+
+    /* 大号步数 + 单位：擦固定的一块（在圆内，碰不到进度环） */
+    display_fill_rect(60, 118, LCD_H_RES - 120, 122, COLOR_BLACK);
     snprintf(buf, sizeof(buf), "%d", steps);
     ui_text_center(126, buf, 5, COLOR_WHITE);
-
     ui_text_center(204, "步", 2, COLOR_GREEN);
 
-    snprintf(buf, sizeof(buf), "目标 %d   %d%%", goal, steps * 100 / goal);
-    ui_text_center(250, buf, 1, COLOR_GRAY);
+    if (full || pct != s_pct_drawn) {
+        snprintf(buf, sizeof(buf), "目标 %d   %d%%", goal, pct);
+        steps_patch_text(250, buf, 1, COLOR_GRAY);
+        s_pct_drawn = pct;
+    }
 
-    const int tenth_km = steps * 7 / 10000;   /* 步长按 0.7m 估算 */
-    snprintf(buf, sizeof(buf), "约 %d.%d 公里", tenth_km / 10, tenth_km % 10);
-    ui_text_center(278, buf, 1, COLOR_GRAY);
-
-    snprintf(buf, sizeof(buf), "%d月%d日 %s", t->month, t->day, ui_week_cn[t->weekday % 7]);
-    ui_text_center(316, buf, 1, COLOR_GRAY);
+    if (full || tenth_km != s_tenth_km_drawn) {
+        snprintf(buf, sizeof(buf), "约 %d.%d 公里", tenth_km / 10, tenth_km % 10);
+        steps_patch_text(278, buf, 1, COLOR_GRAY);
+        s_tenth_km_drawn = tenth_km;
+    }
 
     s_steps_drawn = steps;
 }
 
-static void steps_tick(const rtc_time_t *t, bool minute_changed)
+static void steps_tick(const rtc_time_t *t, bool day_changed)
 {
-    if (pedometer_steps() != s_steps_drawn || minute_changed) {
-        steps_render(t);
+    if (day_changed) {
+        steps_render(t, true);
+    } else if (pedometer_steps() != s_steps_drawn) {
+        steps_render(t, false);
     }
 }
 
@@ -520,6 +589,10 @@ static void steps_tick(const rtc_time_t *t, bool minute_changed)
 void face_render(face_t face, const rtc_time_t *t, bool full)
 {
     (void)full;
+
+    /* 整页先画到 PSRAM 帧缓冲，画完再一次性推屏：
+     * 切页时不会出现「先清成黑屏、再逐块画出来」的闪烁。 */
+    display_frame_begin();
 
     switch (face) {
     case FACE_ANALOG:
@@ -542,7 +615,7 @@ void face_render(face_t face, const rtc_time_t *t, bool full)
         snake_start();
         break;
     case FACE_STEPS:
-        steps_render(t);
+        steps_render(t, true);
         break;
     case FACE_AI:
         voice_ai_invalidate();
@@ -551,6 +624,8 @@ void face_render(face_t face, const rtc_time_t *t, bool full)
     default:
         break;
     }
+
+    display_frame_end();
 }
 
 void face_tick(face_t face, const rtc_time_t *t, bool minute_changed, bool day_changed)
@@ -561,21 +636,19 @@ void face_tick(face_t face, const rtc_time_t *t, bool minute_changed, bool day_c
         analog_tick(t);
         break;
     case FACE_CLASSIC:
-        classic_tick(t);
+        classic_tick(t, minute_changed);
         break;
     case FACE_MINIMAL:
-        minimal_tick(t, day_changed);
+        minimal_tick(t, minute_changed, day_changed);
         break;
     case FACE_INFO:
         info_render(t, false);
         break;
     case FACE_WEATHER:
-        if (minute_changed) {
-            weather_render(t);
-        }
+        weather_tick(t, minute_changed, day_changed);
         break;
     case FACE_STEPS:
-        steps_tick(t, minute_changed);
+        steps_tick(t, day_changed);
         break;
     default:
         break;

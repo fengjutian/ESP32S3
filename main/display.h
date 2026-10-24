@@ -101,6 +101,20 @@ void display_draw_arc(int cx, int cy, int radius, int thickness,
                       uint16_t fg, uint16_t track, uint16_t bg);
 
 /**
+ * @brief 开始整页离屏合成：期间所有绘制先写进 PSRAM 帧缓冲，不直接刷屏。
+ *
+ * 必须与 display_frame_end() 成对使用（可嵌套）。切页时用它把新页面
+ * 一次性画完再推屏，避免「先清黑再逐块画」的整屏黑闪。
+ * 没分配到帧缓冲时自动退化为直接刷屏。
+ */
+void display_frame_begin(void);
+
+/**
+ * @brief 结束离屏合成并把整页推送到屏幕（仍按 LINE_CHUNK 行分块 DMA）。
+ */
+void display_frame_end(void);
+
+/**
  * @brief 取内部行缓冲，用于应用层自行合成画面。
  *
  * 缓冲容量为 LCD_H_RES × LINE_CHUNK 个像素（LINE_CHUNK = 16）。

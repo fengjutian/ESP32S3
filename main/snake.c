@@ -246,6 +246,10 @@ void snake_start(void)
 {
     load_best();
 
+    /* 重开/进入游戏都是整页换画面，同样走离屏合成，避免清屏黑闪。
+     * 从 face_render() 进来时帧锁可重入，不会重复推屏。 */
+    display_frame_begin();
+
     display_clear(COLOR_BLACK);
     draw_board();
     draw_buttons();
@@ -271,6 +275,8 @@ void snake_start(void)
 
     place_food();
     draw_hud();
+
+    display_frame_end();
 }
 
 void snake_poll(void)

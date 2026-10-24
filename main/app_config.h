@@ -1,18 +1,22 @@
 /*
- * 应用级配置（WiFi 账号、NTP 服务器、时区）。
+ * 应用级配置（NTP、时区、天气）。
  *
- * 注意：这个文件含密码，已加入 .gitignore，不会被提交。
- *       新克隆项目时请从 app_config.example.h 复制一份。
+ * WiFi 账号不再写死在这里：首次开机会进入配网模式（热点 ESP-Watch），
+ * 手机网页填好后存进 NVS，之后自动使用。
+ *
+ * 如果需要临时固定一个账号（比如调试），填下面两个宏即可：
+ *   APP_WIFI_SSID / APP_WIFI_PASSWORD
+ * 它们只是 NVS 为空时的兜底，优先级低于配网保存的账号。
+ *
+ * 注意：如果填了密码，请确保本文件在 .gitignore 里。
  *
  * SPDX-License-Identifier: CC0-1.0
  */
 #pragma once
 
-/* WiFi 名称（SSID）—— 华为 TC7102 的 2.4G 网络名 */
-#define APP_WIFI_SSID       "502"
-
-/* WiFi 密码 */
-#define APP_WIFI_PASSWORD   "15295558830"
+/* WiFi 兜底账号（留空 = 完全依赖配网） */
+#define APP_WIFI_SSID       ""
+#define APP_WIFI_PASSWORD   ""
 
 /* NTP 服务器；国内可用 ntp.aliyun.com / cn.pool.ntp.org */
 #define APP_NTP_SERVER      "ntp.aliyun.com"
@@ -28,3 +32,10 @@
 
 /* 天气刷新周期（分钟）。每次刷新会临时开 WiFi，约 6 秒 */
 #define WEATHER_REFRESH_MIN     30
+
+/* 配网开关：
+ *   0 = 正常（NVS 有账号就用，没有才开配网热点）
+ *   1 = 强制配网（忽略 NVS 和上面的兜底账号，开机直接开热点）
+ * 测试配网时临时改成 1，测完改回 0。
+ */
+#define APP_FORCE_PROVISION     0

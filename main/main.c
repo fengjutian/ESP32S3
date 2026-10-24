@@ -21,6 +21,8 @@
 #include "board_i2c.h"
 #include "bq27220.h"
 #include "display.h"
+#include "imu.h"
+#include "pedometer.h"
 #include "rtc.h"
 #include "touch.h"
 #include "watch.h"
@@ -84,6 +86,11 @@ void app_main(void)
     if (bq27220_init() != ESP_OK) {
         ESP_LOGW(TAG, "fuel gauge unavailable");
     }
+
+    if (imu_init() != ESP_OK) {
+        ESP_LOGW(TAG, "IMU unavailable (pedometer disabled)");
+    }
+    pedometer_init();
 
     if (touch_init() != ESP_OK) {
         ESP_LOGW(TAG, "touch unavailable");

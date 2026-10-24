@@ -29,6 +29,11 @@ static uint8_t s_release_cnt;
 
 esp_err_t touch_init(void)
 {
+    /* CST816S 空闲会自动休眠，此时 I2C 读会 NAK。驱动会打 ERROR 日志刷屏，
+     * 这里把它的内部 tag 静音（功能不受影响，触点到来时仍能正常读到）。 */
+    esp_log_level_set("lcd_panel.io.i2c", ESP_LOG_NONE);
+    esp_log_level_set("CST816S", ESP_LOG_NONE);
+
     ESP_RETURN_ON_ERROR(board_i2c_init(), TAG, "i2c bus init failed");
 
     esp_lcd_panel_io_handle_t tp_io = NULL;

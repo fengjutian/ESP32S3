@@ -18,9 +18,11 @@
 
 #include "app_config.h"
 #include "display.h"
+#include "pedometer.h"
 #include "snake.h"
 #include "ui.h"
 #include "weather.h"
+#include "wifi_prov.h"
 
 /* ================= 指针表盘 ================= */
 
@@ -354,7 +356,11 @@ static void info_render(const rtc_time_t *t, bool full)
              (unsigned long)(up % 60));
     info_row(248, buf);
 
-    snprintf(buf, sizeof(buf), "表盘   %s", ui_face_name[ui_face]);
+    if (wifi_prov_active()) {
+        snprintf(buf, sizeof(buf), "网络   配网中");
+    } else {
+        snprintf(buf, sizeof(buf), "表盘   %s", ui_face_name[ui_face]);
+    }
     info_row(286, buf);
 }
 
@@ -462,6 +468,52 @@ static void weather_render(const rtc_time_t *t)
     ui_text_center(300, buf, 1, COLOR_GRAY);
 }
 
+/* ================= 计步表盘 ================= */
+
+static int s_steps_drawn = -1;
+
+static void steps_render(const rtc_time_t *t)
+{
+    char buf[40];
+    const int steps = pedometer_steps();
+    const int goal = pedometer_goal();
+
+    display_clear(COLOR_BLACK);
+
+    int deg = (goal > 0) ? (steps * 360 / goal) : 0;
+    if (deg > 360) {
+        deg = 360;
+    }
+    display_draw_ring(UI_RING_CX, UI_RING_CY, UI_RING_R, UI_RING_W, 0, deg,
+                      COLOR_GREEN, UI_COLOR_TRACK, COLOR_BLACK);
+
+    ui_text_center(92, "今日步数", 1, COLOR_GRAY);
+
+    snprintf(buf, sizeof(buf), "%d", steps);
+    ui_text_center(126, buf, 5, COLOR_WHITE);
+
+    ui_text_center(204, "步", 2, COLOR_GREEN);
+
+    snprintf(buf, sizeof(buf), "目标 %d   %d%%", goal, steps * 100 / goal);
+    ui_text_center(250, buf, 1, COLOR_GRAY);
+
+    const int tenth_km = steps * 7 / 10000;   /* 步长按 0.7m 估算 */
+    snprintf(buf, sizeof(buf), "约 %d.%d 公里", tenth_km / 10, tenth_km % 10);
+    ui_text_center(278, buf, 1, COLOR_GRAY);
+
+    snprintf(buf, sizeof(buf), "%d月%d日 %s", t->month, t->day, ui_week_cn[t->weekday % 7]);
+    ui_text_center(316, buf, 1, COLOR_GRAY);
+
+    s_steps_drawn = steps;
+}
+
+static void steps_tick(const rtc_time_t *t, bool minute_changed)
+{
+    if (pedometer_steps() != s_steps_drawn || minute_changed) {
+        steps_render(t);
+    }
+}
+
 /* ================= 分发 ================= */
 
 void face_render(face_t face, const rtc_time_t *t, bool full)
@@ -488,6 +540,9 @@ void face_render(face_t face, const rtc_time_t *t, bool full)
     case FACE_SNAKE:
         snake_start();
         break;
+    case FACE_STEPS:
+        steps_render(t);
+        break;
     default:
         break;
     }
@@ -513,6 +568,9 @@ void face_tick(face_t face, const rtc_time_t *t, bool minute_changed, bool day_c
         if (minute_changed) {
             weather_render(t);
         }
+        break;
+    case FACE_STEPS:
+        steps_tick(t, minute_changed);
         break;
     default:
         break;

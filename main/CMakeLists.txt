@@ -1,11 +1,12 @@
 idf_component_register(
-    SRCS "main.c"
+    SRCS "pedometer.c" "imu.c" "main.c"
          "board_i2c.c"
          "display.c"
          "touch.c"
          "rtc.c"
          "bq27220.c"
          "weather.c"
+         "wifi_prov.c"
          "wifi_time.c"
          "ui.c"
          "faces.c"
@@ -28,6 +29,7 @@ idf_component_register(
          esp_event
          lwip
          esp_http_client
+         esp_http_server
          esp-tls
          mbedtls
     INCLUDE_DIRS "")

@@ -20,6 +20,7 @@
 #include "bq27220.h"
 #include "display.h"
 #include "faces.h"
+#include "pedometer.h"
 #include "rtc.h"
 #include "snake.h"
 #include "touch.h"
@@ -30,8 +31,7 @@
 
 static const char *TAG = "watch";
 
-#define SWIPE_THRESHOLD   60        /* 横向位移超过这个像素才算滑动 */
-#define SNAKE_TURN_STEP   25        /* 贪吃蛇转向的最小位移 */
+#define SWIPE_THRESHOLD   60        /* 位移超过这个像素才算滑动 */
 #define IDLE_DIM_MS       30000     /* 无操作多久降亮度 */
 #define DIM_PERCENT       15
 
@@ -118,8 +118,7 @@ static void clock_from_software(rtc_time_t *t)
     t->weekday = pcf85063_weekday(year, (int)month, (int)day);
 }
 
-void watch_set_time(time_t epoch)
-{
+void watch_set_time(time_t epoch){
     /* 先按当前时区换算成本地时间，否则会显示成 UTC */
     struct tm local;
     localtime_r(&epoch, &local);
@@ -137,6 +136,38 @@ void watch_set_time(time_t epoch)
     ESP_LOGI(TAG, "clock set to %04d-%02d-%02d %02d:%02d:%02d",
              local.tm_year + 1900, local.tm_mon + 1, local.tm_mday,
              local.tm_hour, local.tm_min, local.tm_sec);
+}
+
+/* ---------------- 提示页（配网引导等） ---------------- */
+
+static volatile bool s_msg_mode;
+static volatile bool s_force_redraw;
+
+void watch_show_message(const char *title, const char *line1, const char *line2, const char *line3)
+{
+    s_msg_mode = true;
+
+    display_set_backlight(100);
+    display_clear(COLOR_BLACK);
+
+    if (title) {
+        ui_text_center(64, title, 2, COLOR_CYAN);
+    }
+    if (line1) {
+        ui_text_center(140, line1, 1, COLOR_WHITE);
+    }
+    if (line2) {
+        ui_text_center(172, line2, 1, COLOR_WHITE);
+    }
+    if (line3) {
+        ui_text_center(204, line3, 1, COLOR_GRAY);
+    }
+}
+
+void watch_clear_message(void)
+{
+    s_msg_mode = false;
+    s_force_redraw = true;
 }
 
 /* ---------------- 手势 ---------------- */
@@ -225,11 +256,6 @@ static void watch_task(void *arg)
     (void)arg;
 
     gesture_state_t touch = {0};
-    struct {
-        bool active;
-        uint16_t x;
-        uint16_t y;
-    } snake_touch = {0};
     int64_t last_input_us = esp_timer_get_time();
     bool dimmed = false;
     uint32_t last_weather_seq = 0;
@@ -247,7 +273,26 @@ static void watch_task(void *arg)
     }
 
     for (;;) {
+        if (s_msg_mode) {
+            /* 提示页不锁界面：碰一下就退回表盘，后台任务继续跑 */
+            touch_point_t p;
+            if (touch_read(&p)) {
+                watch_clear_message();
+            }
+            vTaskDelay(pdMS_TO_TICKS(50));
+            continue;
+        }
+
         clock_from_software(&now);
+
+        /* 计步：喂日期（跨天清零）+ 采样 IMU */
+        pedometer_set_date(now.year, now.month, now.day);
+        pedometer_update();
+
+        if (s_force_redraw) {
+            s_force_redraw = false;
+            face_render(ui_face, &now, true);
+        }
 
         /* 电量每 5 秒刷新 */
         const int64_t now_us = esp_timer_get_time();
@@ -294,44 +339,31 @@ static void watch_task(void *arg)
         const bool pressed_now = touch_read(&pt);
         const gesture_t gesture = gesture_feed(&touch, pressed_now, pt.x, pt.y);
 
-        /* 贪吃蛇：按下后位移超过阈值立即转向，不需要抬手 */
+        /* 贪吃蛇：方向键转向、棋盘内轻触暂停、滑动或长按切走 */
         if (ui_face == FACE_SNAKE) {
-            if (pressed_now) {
-                if (!snake_touch.active) {
-                    snake_touch.active = true;
-                    snake_touch.x = pt.x;
-                    snake_touch.y = pt.y;
-                }
-                const int dx = (int)pt.x - (int)snake_touch.x;
-                const int dy = (int)pt.y - (int)snake_touch.y;
-                if (abs(dx) >= SNAKE_TURN_STEP || abs(dy) >= SNAKE_TURN_STEP) {
-                    if (abs(dx) >= abs(dy)) {
-                        snake_turn(dx > 0 ? 1 : -1, 0);
-                    } else {
-                        snake_turn(0, dy > 0 ? 1 : -1);
-                    }
-                    snake_touch.x = pt.x;
-                    snake_touch.y = pt.y;
-                }
-            } else {
-                snake_touch.active = false;
-            }
-        }
-
-        if (ui_face == FACE_SNAKE) {
-            /* 贪吃蛇：滑动转向、结束后轻触重开、长按退出 */
             switch (gesture) {
             case GESTURE_TAP:
+                if (snake_tap_at(pt.x, pt.y)) {
+                    break;              /* 点中方向键 */
+                }
                 if (snake_is_over()) {
                     ESP_LOGI(TAG, "snake: restart");
                     snake_start();
+                } else {
+                    snake_toggle_pause();
                 }
                 break;
+
+            case GESTURE_SWIPE_LEFT:
+            case GESTURE_SWIPE_RIGHT:
+            case GESTURE_SWIPE_UP:
+            case GESTURE_SWIPE_DOWN:
             case GESTURE_LONG_PRESS:
                 ui_face = (face_t)((ui_face + 1) % FACE_COUNT);
-                ESP_LOGI(TAG, "exit game -> %s", ui_face_name[ui_face]);
+                ESP_LOGI(TAG, "leave game -> %s", ui_face_name[ui_face]);
                 face_render(ui_face, &now, true);
                 break;
+
             default:
                 break;
             }

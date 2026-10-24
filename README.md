@@ -125,19 +125,25 @@ I (4991) watch: clock set to 2026-10-24 00:16:24      ← SNTP 校准后
 
 RTC 仍会写入，但这块板上的 PCF85063 年份寄存器异常，**不读它**（详见第 5 节第 11 条）。
 
-### 启用联网校时
+### 启用联网校时（WiFi 配网）
 
-编辑 [main/app_config.h](main/app_config.h)：
+**不需要改代码**。首次开机会自动进入配网模式：
 
-```c
-#define APP_WIFI_SSID       "你的WiFi名称"
-#define APP_WIFI_PASSWORD   "你的WiFi密码"
-#define APP_NTP_SERVER      "ntp.aliyun.com"
-#define APP_TZ              "CST-8"          /* 中国标准时间 */
-```
+1. 屏幕提示「WiFi 配网」，手机连热点 **`ESP-Watch`**（密码 **`12345678`**）
+2. 浏览器打开 **`http://192.168.4.1`**
+3. 填写家里的 WiFi 名称和密码，点「保存并连接」
+4. 设备自动重启并连接，账号存进 NVS，**以后开机直接用，不再询问**
 
-留空则跳过校时，表盘继续用 RTC 走时。校时成功后日志会打印
-`RTC updated: 2026-10-23 23:45:01`，随后自动关闭 WiFi（省电、降发热）。
+配网热点只开 3 分钟；没配完则离线走时（本地时钟照常运行）。
+连续 3 次连接失败会自动重新开热点配网。
+
+想强制重新配网，把 [main/app_config.h](main/app_config.h) 里的
+`APP_FORCE_PROVISION` 改成 `1` 烧录一次即可（测完改回 0）。
+
+`APP_NTP_SERVER`、`APP_TZ` 等仍在该文件里配置。
+
+校时成功后日志会打印 `time synced: 2026-10-24 11:58:12`，随后自动关闭 WiFi
+（省电、降发热）；天气每 30 分钟联网 6 秒刷新一次。
 
 ---
 
@@ -160,7 +166,7 @@ RTC 仍会写入，但这块板上的 PCF85063 年份寄存器异常，**不读�
 | [main/bq27220.c](main/bq27220.c) / [bq27220.h](main/bq27220.h) | BQ27220 电量计（电压、电量百分比） |
 | [main/wifi_time.c](main/wifi_time.c) / [wifi_time.h](main/wifi_time.h) | 后台 WiFi + SNTP 校时，写入 RTC |
 | [main/board_i2c.c](main/board_i2c.c) / [board_i2c.h](main/board_i2c.h) | 共享 I2C 总线（触摸/RTC/电量计） |
-| [main/app_config.h](main/app_config.h) | **WiFi 账号、NTP 服务器、时区** |
+| [main/app_config.h](main/app_config.h) | NTP 服务器、时区、天气坐标、配网开关 |
 
 ### API 用法
 
@@ -267,7 +273,7 @@ hello_world/
 ├── main/
 │   ├── CMakeLists.txt             组件依赖清单
 │   ├── main.c                     应用入口：初始化各外设并启动任务
-│   ├── app_config.h               WiFi 账号 / NTP / 时区 / 天气坐标
+│   ├── app_config.h               NTP / 时区 / 天气坐标 / 配网开关
 │   ├── board_config.h             板级硬件配置（屏幕/触摸/I2C 引脚与参数）
 │   │
 │   ├── display.c / display.h      ST77916 面板驱动（初始化、填充、文本、圆环、行缓冲）
@@ -284,7 +290,10 @@ hello_world/
 │   ├── rtc.c / rtc.h              PCF85063 实时时钟
 │   ├── bq27220.c / bq27220.h      BQ27220 电量计（电压估算电量）
 │   ├── weather.c / weather.h      Open-Meteo 天气拉取与解析
+│   ├── wifi_prov.c / wifi_prov.h  WiFi 配网（NVS 账号 + SoftAP 网页）
 │   ├── wifi_time.c / wifi_time.h  WiFi + SNTP + 天气的后台任务
+│   ├── imu.c / imu.h              QMI8658 加速度计
+│   ├── pedometer.c / pedometer.h  计步算法（峰值检测 + NVS 按天保存）
 │   ├── board_i2c.c / board_i2c.h  共享 I2C 总线
 │   └── idf_component.yml          组件管理器清单（esp_lcd_st77916 / esp_lcd_touch / cst816s）
 └── managed_components/            组件管理器下载的依赖（已 gitignore）

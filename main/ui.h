@@ -23,6 +23,7 @@ typedef enum {
     FACE_INFO,         /* 信息 */
     FACE_WEATHER,      /* 天气 */
     FACE_SNAKE,        /* 贪吃蛇 */
+    FACE_STEPS,        /* 计步 */
     FACE_COUNT
 } face_t;
 

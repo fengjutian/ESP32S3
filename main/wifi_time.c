@@ -1,5 +1,10 @@
 /*
- * 后台联网任务：连 WiFi → SNTP 校时 → 拉天气 → 关 WiFi，然后周期性重复。
+ * 后台联网任务：连 WiFi → SNTP 校时 → 拉天气 → 关 WiFi，周期重复。
+ *
+ * 账号来源优先级：
+ *   1. NVS 里保存的（配网写入）
+ *   2. app_config.h 里写死的（兼容旧配置）
+ *   3. 都没有 → 启动 SoftAP 网页配网，超时则离线运行
  *
  * SPDX-License-Identifier: CC0-1.0
  */
@@ -8,8 +13,8 @@
 #include <time.h>
 
 #include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
 #include "freertos/event_groups.h"
+#include "freertos/task.h"
 
 #include "esp_event.h"
 #include "esp_log.h"
@@ -21,6 +26,7 @@
 #include "rtc.h"
 #include "watch.h"
 #include "weather.h"
+#include "wifi_prov.h"
 #include "wifi_time.h"
 
 static const char *TAG = "net";
@@ -30,6 +36,8 @@ static const char *TAG = "net";
 
 #define WIFI_TIMEOUT_MS     20000
 #define SNTP_TIMEOUT_MS     20000
+#define PROV_TIMEOUT_MS     180000   /* 配网热点开 3 分钟 */
+#define MAX_FAIL_STREAK     3        /* 连续失败几次后重新配网 */
 
 static EventGroupHandle_t s_events;
 static SemaphoreHandle_t s_refresh_req;
@@ -100,15 +108,17 @@ static void do_sntp(void)
     esp_netif_sntp_deinit();
 }
 
+static void build_sta_config(wifi_config_t *cfg, const char *ssid, const char *pass)
+{
+    memset(cfg, 0, sizeof(*cfg));
+    memcpy(cfg->sta.ssid, ssid, strnlen(ssid, sizeof(cfg->sta.ssid)));
+    memcpy(cfg->sta.password, pass, strnlen(pass, sizeof(cfg->sta.password)));
+    cfg->sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+}
+
 static void net_task(void *arg)
 {
     (void)arg;
-
-    if (strlen(APP_WIFI_SSID) == 0) {
-        ESP_LOGW(TAG, "no WiFi credentials in main/app_config.h, skipping network");
-        vTaskDelete(NULL);
-        return;
-    }
 
     s_events = xEventGroupCreate();
     s_refresh_req = xSemaphoreCreateBinary();
@@ -126,20 +136,42 @@ static void net_task(void *arg)
     ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP,
                                                         &wifi_event_handler, NULL, &h_ip));
 
-    wifi_config_t wifi_cfg = {0};
-    memcpy(wifi_cfg.sta.ssid, APP_WIFI_SSID, strlen(APP_WIFI_SSID));
-    memcpy(wifi_cfg.sta.password, APP_WIFI_PASSWORD, strlen(APP_WIFI_PASSWORD));
-    wifi_cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+    /* 账号：NVS → 编译期配置 → 配网 */
+    char ssid[33] = {0};
+    char pass[65] = {0};
+    bool have = false;
 
+    if (!APP_FORCE_PROVISION) {
+        have = wifi_prov_get_credentials(ssid, sizeof(ssid), pass, sizeof(pass));
+
+        if (!have && strlen(APP_WIFI_SSID) > 0) {
+            snprintf(ssid, sizeof(ssid), "%s", APP_WIFI_SSID);
+            snprintf(pass, sizeof(pass), "%s", APP_WIFI_PASSWORD);
+            have = true;
+            ESP_LOGI(TAG, "using credentials from app_config.h");
+        }
+    }
+
+    if (!have) {
+        ESP_LOGW(TAG, "no credentials, starting provisioning AP");
+        wifi_prov_start(PROV_TIMEOUT_MS);
+        vTaskDelay(portMAX_DELAY);   /* 配网成功会重启设备 */
+        return;
+    }
+
+    wifi_config_t wifi_cfg;
+    build_sta_config(&wifi_cfg, ssid, pass);
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_cfg));
+
+    int fail_streak = 0;
 
     for (;;) {
         s_retry = 0;
         s_shutting_down = false;
         xEventGroupClearBits(s_events, WIFI_CONNECTED_BIT | WIFI_FAILED_BIT);
 
-        ESP_LOGI(TAG, "connecting to \"%s\"...", APP_WIFI_SSID);
+        ESP_LOGI(TAG, "connecting to \"%s\"...", ssid);
 
         if (esp_wifi_start() == ESP_OK) {
             esp_wifi_connect();
@@ -150,10 +182,18 @@ static void net_task(void *arg)
                                                          pdMS_TO_TICKS(WIFI_TIMEOUT_MS));
             if (bits & WIFI_CONNECTED_BIT) {
                 ESP_LOGI(TAG, "WiFi connected");
+                fail_streak = 0;
                 do_sntp();
                 weather_fetch();
             } else {
                 ESP_LOGW(TAG, "WiFi connect failed, keep local time");
+                if (++fail_streak >= MAX_FAIL_STREAK) {
+                    ESP_LOGW(TAG, "failed %d times, re-provisioning", fail_streak);
+                    s_shutting_down = true;
+                    esp_wifi_stop();
+                    wifi_prov_start(PROV_TIMEOUT_MS);
+                    vTaskDelay(portMAX_DELAY);   /* 配网成功会重启设备 */
+                }
             }
         }
 

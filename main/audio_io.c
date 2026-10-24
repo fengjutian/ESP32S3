@@ -284,30 +284,62 @@ esp_err_t audio_play(const int16_t *pcm, size_t samples, volatile bool *cancel)
         return ESP_ERR_INVALID_STATE;
     }
 
-    audio_io_on();
-    gpio_set_level(AUDIO_PIN_PA, 1);
-    vTaskDelay(pdMS_TO_TICKS(20));   /* 等功放上电，避免咬字 */
+    audio_play_begin();
 
     size_t done = 0;
     while (done < samples) {
         if (cancel && *cancel) {
             break;
         }
-        size_t n = samples - done;
-        if (n > 512) {
-            n = 512;
+        const size_t n = (samples - done > 512) ? 512 : (samples - done);
+        if (audio_play_write(pcm + done, n) != ESP_OK) {
+            break;
         }
+        done += n;
+    }
+
+    audio_play_end();
+    return ESP_OK;
+}
+
+esp_err_t audio_play_begin(void)
+{
+    if (!s_ready) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    audio_io_on();
+    gpio_set_level(AUDIO_PIN_PA, 1);
+    vTaskDelay(pdMS_TO_TICKS(20));   /* 等功放上电，避免咬字 */
+    return ESP_OK;
+}
+
+esp_err_t audio_play_write(const int16_t *pcm, size_t samples)
+{
+    if (!s_ready || !pcm || samples == 0) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    size_t done = 0;
+    while (done < samples) {
+        const size_t n = (samples - done > 512) ? 512 : (samples - done);
         for (size_t i = 0; i < n; i++) {
             s_stage[2 * i] = pcm[done + i];
             s_stage[2 * i + 1] = pcm[done + i];
         }
         if (esp_codec_dev_write(s_out, s_stage, (int)(n * 2 * sizeof(int16_t))) != ESP_CODEC_DEV_OK) {
             ESP_LOGW(TAG, "i2s write failed at %u/%u", (unsigned)done, (unsigned)samples);
-            break;
+            return ESP_FAIL;
         }
         done += n;
     }
+    return ESP_OK;
+}
 
+esp_err_t audio_play_end(void)
+{
+    if (!s_ready) {
+        return ESP_ERR_INVALID_STATE;
+    }
     /* 等 DMA 把最后一帧送出去 */
     vTaskDelay(pdMS_TO_TICKS(150));
     gpio_set_level(AUDIO_PIN_PA, 0);

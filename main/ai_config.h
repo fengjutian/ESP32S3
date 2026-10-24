@@ -65,12 +65,12 @@
 /* 系统提示词：手表屏幕小、喇叭小，回答要短 */
 #ifndef AI_SYSTEM_PROMPT
 #define AI_SYSTEM_PROMPT        "你是一块智能手表的语音助手。回答用口语化的中文，"\
-                                "控制在80字以内，不要用 Markdown、列表或表情符号。"
+                                "控制在40字以内，直接说结论，不要用 Markdown、列表或表情符号。"
 #endif
 
 /* 回答 token 上限，越小越快 */
 #ifndef AI_CHAT_MAX_TOKENS
-#define AI_CHAT_MAX_TOKENS      320
+#define AI_CHAT_MAX_TOKENS      160
 #endif
 
 /* M3.1-Flash 总是思考，low 最快；可选 low/medium/high/xhigh/max */
@@ -80,7 +80,7 @@
 
 /* 合成语音的最大字数（超出的截断，省流量也省时间） */
 #ifndef AI_TTS_MAX_CHARS
-#define AI_TTS_MAX_CHARS        300
+#define AI_TTS_MAX_CHARS        80
 #endif
 
 /* 单次 HTTPS 请求超时 */

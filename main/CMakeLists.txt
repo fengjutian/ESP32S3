@@ -10,6 +10,7 @@ idf_component_register(
          "wifi_time.c"
          "net_link.c"
          "minimax.c"
+         "local_intent.c"
          "audio_io.c"
          "voice_ai.c"
          "ui.c"

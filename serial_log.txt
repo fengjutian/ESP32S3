@@ -1,185 +1,203 @@
-I (16002) imu: accel -0.026 -0.062 +0.937 g | raw FF2D FE04 1DF9ESP-ROM:esp32s3-20210327
-Build:Mar 27 2021
-rst:0x15 (USB_UART_CHIP_RESET),boot:0x2b (SPI_FAST_FLASH_BOOT)
-Saved PC:0x4037e9ca
-SPIWP:0xee
-mode:DIO, clock div:1
-load:0x3fce2820,len:0x14f0
-load:0x403c8700,len:0xde4
-load:0x403cb700,len:0x2f58
-entry 0x403c8904
-I (24) boot: ESP-IDF v6.1 2nd stage bootloader
-I (24) boot: compile time Oct 24 2026 15:15:03
-I (25) boot: Multicore bootloader
-I (25) boot: chip revision: v0.2
-I (27) boot: efuse block revision: v1.4
-I (31) boot.esp32s3: Boot SPI Speed : 80MHz
-I (35) boot.esp32s3: SPI Mode       : DIO
-I (39) boot.esp32s3: SPI Flash Size : 16MB
-I (42) boot: Enabling RNG early entropy source...
-I (47) boot: Partition Table:
-I (50) boot: ## Label            Usage          Type ST Offset   Length
-I (56) boot:  0 nvs              WiFi data        01 02 00009000 00006000
-I (62) boot:  1 phy_init         RF data          01 01 0000f000 00001000
-I (69) boot:  2 factory          factory app      00 00 00010000 00400000
-I (75) boot: End of partition table
-I (79) esp_image: segment 0: paddr=00010020 vaddr=3c0d0020 size=65e14h (417300) map
-I (162) esp_image: segment 1: paddr=00075e3c vaddr=3fc9cc00 size=05f50h ( 24400) load
-I (168) esp_image: segment 2: paddr=0007bd94 vaddr=40374000 size=04284h ( 17028) load
-I (172) esp_image: segment 3: paddr=00080020 vaddr=42000020 size=c952ch (824620) map
-I (324) esp_image: segment 4: paddr=00149554 vaddr=40378284 size=148d0h ( 84176) load
-I (344) esp_image: segment 5: paddr=0015de2c vaddr=50000000 size=00024h (    36) load
-I (355) boot: Loaded app from partition at offset 0x10000
-I (355) boot: Disabling RNG early entropy source...
-I (365) octal_psram: vendor id    : 0x0d (AP)
-I (365) octal_psram: dev id       : 0x02 (generation 3)
-I (365) octal_psram: density      : 0x03 (64 Mbit)
-I (367) octal_psram: good-die     : 0x01 (Pass)
-I (372) octal_psram: Latency      : 0x01 (Fixed)
-I (376) octal_psram: VCC          : 0x01 (3V)
-I (380) octal_psram: SRF          : 0x01 (Fast Refresh)
-I (385) octal_psram: BurstType    : 0x01 (Hybrid Wrap)
-I (390) octal_psram: BurstLen     : 0x01 (32 Byte)
-I (394) octal_psram: Readlatency  : 0x02 (10 cycles@Fixed)
-I (399) octal_psram: DriveStrength: 0x00 (1/1)
-I (404) MSPI Timing: Enter psram timing tuning
-I (409) esp_psram: Found 8MB PSRAM device
-I (412) esp_psram: Speed: 80MHz
-I (415) cpu_start: Multicore app
-I (850) esp_psram: SPI SRAM memory test OK
-I (859) cpu_start: GPIO 44 and 43 are used as console UART I/O pins
-I (860) cpu_start: Pro cpu start user code
-I (860) cpu_start: cpu freq: 160000000 Hz
-I (861) app_init: Application information:
-I (865) app_init: Project name:     hello_world
-I (869) app_init: App version:      32fed6e-dirty
-I (874) app_init: Compile time:     Oct 24 2026 15:14:51
-I (879) app_init: ELF file SHA256:  2df114a7f...
-I (883) app_init: ESP-IDF:          v6.1
-I (887) efuse_init: Min chip rev:     v0.0
-I (891) efuse_init: Max chip rev:     v0.99 
-I (895) efuse_init: Chip rev:         v0.2
-I (899) heap_init: Initializing. RAM available for dynamic allocation:
-I (905) heap_init: At 3FCA8820 len 00040EF0 (259 KiB): RAM
-I (910) heap_init: At 3FCE9710 len 00005724 (21 KiB): RAM
-I (915) heap_init: At 3FCF0000 len 00008000 (32 KiB): DRAM
-I (920) heap_init: At 600FE000 len 00001FE8 (7 KiB): RTCRAM
-I (926) esp_psram: Adding pool of 8192K of PSRAM memory to heap allocator
-I (933) spi_flash: detected chip: generic
-I (936) spi_flash: flash io: dio
-I (940) sleep_gpio: Configure to isolate all GPIO pins in sleep state
-I (945) sleep_gpio: Enable automatic switching of GPIO sleep configuration
-I (952) main_task: Started on CPU0
-I (952) esp_psram: Reserving pool of 32K of internal memory for DMA/internal allocations
-I (962) main_task: Calling app_main()
-Hello world!
-This is esp32s3 chip with 2 CPU core(s), WiFi/BLE, silicon revision v0.2, 16MB external flash
-I (1012) pp: pp rom version: e7ae62f
-I (1012) net80211: net80211 rom version: e7ae62f
-I (1022) wifi:wifi driver task: 3fceeab0, prio:23, stack:6656, core=0
-I (1032) wifi:wifi firmware version: e12a754
-I (1032) wifi:wifi certification version: v7.0
-I (1032) wifi:config NVS flash: enabled
-I (1032) wifi:config nano formatting: disabled
-I (1042) wifi:Init data frame dynamic rx buffer num: 32
-I (1042) wifi:Init static rx mgmt buffer num: 5
-I (1052) wifi:Init management short buffer num: 32
-I (1052) wifi:Init dynamic tx buffer num: 32
-I (1052) wifi:Init static tx FG buffer num: 2
-I (1062) wifi:Init static rx buffer size: 1600
-I (1062) wifi:Init static rx buffer num: 10
-I (1072) wifi:Init dynamic rx buffer num: 32
-I (1072) wifi_init: rx ba win: 6
-I (1072) wifi_init: accept mbox: 6
-I (1082) wifi_init: tcpip mbox: 32
-I (1082) wifi_init: udp mbox: 6
-I (1082) wifi_init: tcp mbox: 6
-I (1092) wifi_init: tcp tx win: 5760
-I (1092) wifi_init: tcp rx win: 5760
-I (1092) wifi_init: tcp mss: 1440
-I (1092) wifi_init: WiFi/LWIP prefer SPIRAM
-I (1102) wifi_init: WiFi IRAM OP enabled
-I (1102) wifi_init: WiFi RX IRAM OP enabled
-I (1112) netlink: ready (keepalive 60 s)
-W (1132) spi_common: GPIO 0 is conflict with others and be overwritten
-W (1132) spi_common: GPIO 0 is conflict with others and be overwritten
-W (1132) spi_common: GPIO 0 is conflict with others and be overwritten
-I (1132) display: panel reg 0x04 = 00 02 7F 7F
-I (1142) display: using init sequence v2 (185 commands)
-I (1142) st77916: version: 2.0.2
-W (1152) gpio: conflict found for GPIO[3]
-I (1152) st77916_spi: LCD panel create success, version: 2.0.2
-I (1422) display: panel ready: 360x360 (ST77916 QSPI, v2)
-I (1422) i2c: bus ready (SCL=10 SDA=11)
-I (1422) pcf85063: PCF85063 ready at 0x51 (仅作备份，时间以 SNTP 为准)
-I (1422) bq27220: BQ27220 ready at 0x55: 4107 mV, 估算 90% (芯片自带为 33%)
-I (1452) imu: I2C devices: 0x18 0x40 0x51 0x55 0x6B
-I (1452) imu: QMI8658 found at 0x6B
-I (1512) imu: 00: 05 7C 40 14 00 00 00 00 01 00 00 00 00 00 00 00
-I (1512) imu: 10: 00 00 00 00 00 00 00 04 04 04 04 04 04 04 04 04
-I (1512) imu: 20: 04 04 04 04 04 04 04 04 04 04 04 04 04 04 04 04
-I (1512) imu: 30: 04 04 04 04 04 04 04 04 04 04 04 04 04 04 04 04
-I (1522) imu: 40: 04 04 04 04 04 04 04 04 04 04 04 04 04 04 04 04
-I (1532) imu: 50: 04 04 04 04 04 04 04 04 04 04 04 04 04 04 04 04
-I (1532) imu: 60: 04 04 04 04 04 04 04 04 04 04 04 04 04 04 04 04
-I (1542) imu: 70: 04 04 04 04 04 04 04 04 04 04 04 04 04 04 04 04
-I (1542) pedo: restored 39 steps (date 20261024)
-I (1952) touch: CST816S ready (esp_lcd_touch driver)
-W (1952) i2s_common: the rx channel on I2S0 is switched from master to slave for full-duplex mode
-I (1962) ES8311: Work in Slave mode
-I (1962) ES7210: Work in Slave mode
-I (1972) ES7210: Enable ES7210_INPUT_MIC1
-I (1972) ES7210: Enable ES7210_INPUT_MIC2
-E (1982) i2s_common: i2s_channel_disable(1516): the channel has not been enabled yet
-I (1982) I2S_IF: Paired data: 0x3fcc0fa0, current mode: playback, paired in_enable: 0, paired out_enable: 0
-I (1992) I2S_IF: STD: TX, data_bit: 16, slot_bit: 16, ws_width: 16, slot_mode: STEREO, slot_mask: 0x3
-I (1992) I2S_IF: STD: TX, sample_rate_hz: 16000, mclk_multiple: 256, clk_src: 6
-I (2022) Adev_Codec: Open codec device OK
-E (2022) i2s_common: i2s_channel_disable(1516): the channel has not been enabled yet
-I (2022) I2S_IF: Current mode(record) and peer mode have same sample_rate 16000, channel 2, bits_per_sample 16
-I (2032) I2S_IF: STD: RX, data_bit: 16, slot_bit: 16, ws_width: 16, slot_mode: STEREO, slot_mask: 0x3
-I (2042) I2S_IF: STD: RX, sample_rate_hz: 16000, mclk_multiple: 256, clk_src: 6
-I (2052) ES7210: Bits 16
-I (2062) ES7210: Enable ES7210_INPUT_MIC1
-I (2062) ES7210: Enable ES7210_INPUT_MIC2
-I (2072) ES7210: Unmuted
-I (2072) Adev_Codec: Open codec device OK
-I (2072) audio: ready (16kHz/16bit, ES8311 + ES7210)
-I (2072) voice: ready (8 s max, 250 KB buffer)
-I (2072) phy_init: phy_version 712,87e8c20e,Apr 13 2026,18:51:10
-I (2112) wifi:mode : sta (44:bd:8d:78:0c:20)
-I (2122) wifi:enable tsf
-I (2122) netlink: connecting to "502"...
-I (2212) wifi:new:<6,0>, old:<1,0>, ap:<255,255>, sta:<6,0>, prof:1, snd_ch_cfg:0x0
-I (2212) wifi:state: init -> auth (0xb0)
-I (2382) main_task: Returned from app_main()
-I (2812) watch: now 2026-10-24 15:15:02
-I (3212) wifi:state: auth -> init (0x200)
-W (3232) netlink: disconnected (reason 2), retry 1
-I (3942) imu: accel -0.024 -0.059 +0.931 g | raw FF3B FE19 1DD0 | soft=39
-I (3942) imu: 58:00 00 00 00 | 60:00 00 00 00
-I (5532) wifi:state: init -> auth (0xb0)
-I (5542) wifi:state: auth -> assoc (0x0)
-I (5552) wifi:state: assoc -> run (0x10)
-I (5582) wifi:connected with 502, aid = 10, channel 6, BW20, bssid = 22:1b:7f:b6:1d:c2
-I (5582) wifi:security: WPA2-PSK, phy: bgn, rssi: -45, cipher(pairwise:0x3, group:0x3), pmf:0
-I (5582) wifi:pm start, type: 1
-
-I (5582) wifi:dp: 1, bi: 102400, li: 3, scale listen interval from 307200 us to 307200 us
-I (5592) wifi:set rx beacon pti, rx_bcn_pti: 0, bcn_timeout: 25000, mt_pti: 0, mt_time: 10000
-I (5602) wifi:AP's beacon interval = 102400 us, DTIM period = 1
-I (6692) esp_netif_handlers: sta ip: 192.168.2.238, mask: 255.255.255.0, gw: 192.168.2.1
-I (6692) netlink: online
-I (6692) minimax: chat: 你好，用一句话证明你在工作
-I (6732) wifi:<ba-add>idx:0 (ifx:0, 22:1b:7f:b6:1d:c2), tid:0, ssn:1, winSize:64
-I (6932) esp-x509-crt-bundle: Certificate validated
-I (6942) imu: accel -0.024 -0.059 +0.932 g | raw FF39 FE1F 1DD7 | soft=39
-I (6942) imu: 58:00 00 00 00 | 60:00 00 00 00
-I (7882) watch: clock set to 2026-10-24 15:22:24
-I (7882) net: time synced: 2026-10-24 15:22:24
-I (8192) watch: now 2026-10-24 15:22:24
-I (8672) minimax: answer: ææ­£å¨å®æ¶ååºä½ çæ¶æ¯ï¼è¯´ææçå·¥ä½ç¶ææ­£å¸¸ã
-I (8682) voice: selftest OK: ææ­£å¨å®æ¶ååºä½ çæ¶æ¯ï¼è¯´ææçå·¥ä½ç¶ææ­£å¸¸ã
-I (9212) esp-x509-crt-bundle: Certificate validated
-I (10032) imu: accel -0.026 -0.059 +0.937 g | raw FF33 FE0F 1DFE | soft=39
-I (10032) imu: 58:00 00 00 00 | 60:00 00 00 00
+I (163) esp_image: segment 1: paddr=0007647c vaddr=3fc9cc00 sizeESP-ROM:esp32s3-20210327
+Build:Mar 27 2021
+rst:0x15 (USB_UART_CHIP_RESET),boot:0x2b (SPI_FAST_FLASH_BOOT)
+Saved PC:0x4037e9ca
+SPIWP:0xee
+mode:DIO, clock div:1
+load:0x3fce2820,len:0x14f0
+load:0x403c8700,len:0xde4
+load:0x403cb700,len:0x2f58
+entry 0x403c8904
+I (24) boot: ESP-IDF v6.1 2nd stage bootloader
+I (24) boot: compile time Oct 24 2026 15:15:03
+I (25) boot: Multicore bootloader
+I (25) boot: chip revision: v0.2
+I (27) boot: efuse block revision: v1.4
+I (31) boot.esp32s3: Boot SPI Speed : 80MHz
+I (35) boot.esp32s3: SPI Mode       : DIO
+I (39) boot.esp32s3: SPI Flash Size : 16MB
+I (42) boot: Enabling RNG early entropy source...
+I (47) boot: Partition Table:
+I (50) boot: ## Label            Usage          Type ST Offset   Length
+I (56) boot:  0 nvs              WiFi data        01 02 00009000 00006000
+I (62) boot:  1 phy_init         RF data          01 01 0000f000 00001000
+I (69) boot:  2 factory          factory app      00 00 00010000 00400000
+I (75) boot: End of partition table
+I (79) esp_image: segment 0: paddr=00010020 vaddr=3c0d0020 size=66454h (418900) map
+I (163) esp_image: segment 1: paddr=0007647c vaddr=3fc9cc00 size=05f50h ( 24400) load
+I (168) esp_image: segment 2: paddr=0007c3d4 vaddr=40374000 size=03c44h ( 15428) load
+I (172) esp_image: segment 3: paddr=00080020 vaddr=42000020 size=ca020h (827424) map
+I (325) esp_image: segment 4: paddr=0014a048 vaddr=40377c44 size=14f10h ( 85776) load
+I (345) esp_image: segment 5: paddr=0015ef60 vaddr=50000000 size=00024h (    36) load
+I (356) boot: Loaded app from partition at offset 0x10000
+I (356) boot: Disabling RNG early entropy source...
+I (366) octal_psram: vendor id    : 0x0d (AP)
+I (366) octal_psram: dev id       : 0x02 (generation 3)
+I (367) octal_psram: density      : 0x03 (64 Mbit)
+I (368) octal_psram: good-die     : 0x01 (Pass)
+I (373) octal_psram: Latency      : 0x01 (Fixed)
+I (377) octal_psram: VCC          : 0x01 (3V)
+I (381) octal_psram: SRF          : 0x01 (Fast Refresh)
+I (386) octal_psram: BurstType    : 0x01 (Hybrid Wrap)
+I (391) octal_psram: BurstLen     : 0x01 (32 Byte)
+I (395) octal_psram: Readlatency  : 0x02 (10 cycles@Fixed)
+I (401) octal_psram: DriveStrength: 0x00 (1/1)
+I (405) MSPI Timing: Enter psram timing tuning
+I (410) esp_psram: Found 8MB PSRAM device
+I (413) esp_psram: Speed: 80MHz
+I (416) cpu_start: Multicore app
+I (851) esp_psram: SPI SRAM memory test OK
+I (860) cpu_start: GPIO 44 and 43 are used as console UART I/O pins
+I (861) cpu_start: Pro cpu start user code
+I (861) cpu_start: cpu freq: 160000000 Hz
+I (862) app_init: Application information:
+I (866) app_init: Project name:     hello_world
+I (871) app_init: App version:      499511c-dirty
+I (875) app_init: Compile time:     Oct 24 2026 15:29:12
+I (880) app_init: ELF file SHA256:  47aaf04aa...
+I (884) app_init: ESP-IDF:          v6.1
+I (888) efuse_init: Min chip rev:     v0.0
+I (892) efuse_init: Max chip rev:     v0.99 
+I (896) efuse_init: Chip rev:         v0.2
+I (900) heap_init: Initializing. RAM available for dynamic allocation:
+I (906) heap_init: At 3FCA8C40 len 00040AD0 (258 KiB): RAM
+I (911) heap_init: At 3FCE9710 len 00005724 (21 KiB): RAM
+I (916) heap_init: At 3FCF0000 len 00008000 (32 KiB): DRAM
+I (921) heap_init: At 600FE000 len 00001FE8 (7 KiB): RTCRAM
+I (927) esp_psram: Adding pool of 8192K of PSRAM memory to heap allocator
+I (934) spi_flash: detected chip: generic
+I (937) spi_flash: flash io: dio
+I (941) sleep_gpio: Configure to isolate all GPIO pins in sleep state
+I (946) sleep_gpio: Enable automatic switching of GPIO sleep configuration
+I (953) main_task: Started on CPU0
+I (953) esp_psram: Reserving pool of 32K of internal memory for DMA/internal allocations
+I (963) main_task: Calling app_main()
+Hello world!
+This is esp32s3 chip with 2 CPU core(s), WiFi/BLE, silicon revision v0.2, 16MB external flash
+I (1013) pp: pp rom version: e7ae62f
+I (1013) net80211: net80211 rom version: e7ae62f
+I (1023) wifi:wifi driver task: 3fceeab0, prio:23, stack:6656, core=0
+I (1033) wifi:wifi firmware version: e12a754
+I (1033) wifi:wifi certification version: v7.0
+I (1033) wifi:config NVS flash: enabled
+I (1033) wifi:config nano formatting: disabled
+I (1043) wifi:Init data frame dynamic rx buffer num: 32
+I (1043) wifi:Init static rx mgmt buffer num: 5
+I (1053) wifi:Init management short buffer num: 32
+I (1053) wifi:Init dynamic tx buffer num: 32
+I (1053) wifi:Init static tx FG buffer num: 2
+I (1063) wifi:Init static rx buffer size: 1600
+I (1063) wifi:Init static rx buffer num: 10
+I (1073) wifi:Init dynamic rx buffer num: 32
+I (1073) wifi_init: rx ba win: 6
+I (1073) wifi_init: accept mbox: 6
+I (1083) wifi_init: tcpip mbox: 32
+I (1083) wifi_init: udp mbox: 6
+I (1083) wifi_init: tcp mbox: 6
+I (1093) wifi_init: tcp tx win: 5760
+I (1093) wifi_init: tcp rx win: 5760
+I (1093) wifi_init: tcp mss: 1440
+I (1093) wifi_init: WiFi/LWIP prefer SPIRAM
+I (1103) wifi_init: WiFi IRAM OP enabled
+I (1103) wifi_init: WiFi RX IRAM OP enabled
+I (1113) netlink: ready (keepalive 60 s)
+W (1133) spi_common: GPIO 0 is conflict with others and be overwritten
+W (1133) spi_common: GPIO 0 is conflict with others and be overwritten
+W (1133) spi_common: GPIO 0 is conflict with others and be overwritten
+I (1133) display: panel reg 0x04 = 00 02 7F 7F
+I (1143) display: using init sequence v2 (185 commands)
+I (1143) st77916: version: 2.0.2
+W (1153) gpio: conflict found for GPIO[3]
+I (1153) st77916_spi: LCD panel create success, version: 2.0.2
+I (1423) display: panel ready: 360x360 (ST77916 QSPI, v2)
+I (1423) i2c: bus ready (SCL=10 SDA=11)
+I (1423) pcf85063: PCF85063 ready at 0x51 (仅作备份，时间以 SNTP 为准)
+I (1423) bq27220: BQ27220 ready at 0x55: 4132 mV, 估算 93% (芯片自带为 34%)
+I (1453) imu: I2C devices: 0x18 0x40 0x51 0x55 0x6B
+I (1453) imu: QMI8658 found at 0x6B
+I (1513) imu: 00: 05 7C 40 14 00 00 00 00 01 00 00 00 00 00 00 00
+I (1513) imu: 10: 00 00 00 00 00 00 00 04 04 04 04 04 04 04 04 04
+I (1513) imu: 20: 04 04 04 04 04 04 04 04 04 04 04 04 04 04 04 04
+I (1513) imu: 30: 04 04 04 04 04 04 04 04 04 04 04 04 04 04 04 04
+I (1523) imu: 40: 04 04 04 04 04 04 04 04 04 04 04 04 04 04 04 04
+I (1533) imu: 50: 04 04 04 04 04 04 04 04 04 04 04 04 04 04 04 04
+I (1533) imu: 60: 04 04 04 04 04 04 04 04 04 04 04 04 04 04 04 04
+I (1543) imu: 70: 04 04 04 04 04 04 04 04 04 04 04 04 04 04 04 04
+I (1543) pedo: restored 61 steps (date 20261024)
+I (1953) touch: CST816S ready (esp_lcd_touch driver)
+W (1953) i2s_common: the rx channel on I2S0 is switched from master to slave for full-duplex mode
+I (1963) ES8311: Work in Slave mode
+I (1963) ES7210: Work in Slave mode
+I (1973) ES7210: Enable ES7210_INPUT_MIC1
+I (1973) ES7210: Enable ES7210_INPUT_MIC2
+E (1983) i2s_common: i2s_channel_disable(1516): the channel has not been enabled yet
+I (1983) I2S_IF: Paired data: 0x3fcc13c0, current mode: playback, paired in_enable: 0, paired out_enable: 0
+I (1993) I2S_IF: STD: TX, data_bit: 16, slot_bit: 16, ws_width: 16, slot_mode: STEREO, slot_mask: 0x3
+I (1993) I2S_IF: STD: TX, sample_rate_hz: 16000, mclk_multiple: 256, clk_src: 6
+I (2023) Adev_Codec: Open codec device OK
+E (2023) i2s_common: i2s_channel_disable(1516): the channel has not been enabled yet
+I (2023) I2S_IF: Current mode(record) and peer mode have same sample_rate 16000, channel 2, bits_per_sample 16
+I (2033) I2S_IF: STD: RX, data_bit: 16, slot_bit: 16, ws_width: 16, slot_mode: STEREO, slot_mask: 0x3
+I (2043) I2S_IF: STD: RX, sample_rate_hz: 16000, mclk_multiple: 256, clk_src: 6
+I (2053) ES7210: Bits 16
+I (2063) ES7210: Enable ES7210_INPUT_MIC1
+I (2063) ES7210: Enable ES7210_INPUT_MIC2
+I (2073) ES7210: Unmuted
+I (2073) Adev_Codec: Open codec device OK
+I (2073) audio: ready (16kHz/16bit, ES8311 + ES7210)
+I (2073) voice: local[现在几点了] -> 现在是 0 点整。
+I (2073) voice: local[今天几号] -> 今天是 1 月 1 日，星期四。
+I (2083) voice: local[今天天气怎么样] -> 天气还没拉到，联网后我再告诉你。
+I (2093) voice: local[还有多少电] -> (cloud)
+I (2093) voice: local[我走了多少步] -> 今天走了 61 步，目标是 8000 步。
+I (2103) voice: local[你是谁] -> 我是这块手表上的语音助手。
+I (2113) voice: local[谢谢] -> 不客气。
+I (2113) voice: local[讲个笑话] -> (cloud)
+I (2123) voice: ready (8 s max, 250 KB buffer)
+I (2123) phy_init: phy_version 712,87e8c20e,Apr 13 2026,18:51:10
+I (2163) wifi:mode : sta (44:bd:8d:78:0c:20)
+I (2163) wifi:enable tsf
+I (2163) netlink: connecting to "502"...
+I (2173) wifi:new:<6,0>, old:<1,0>, ap:<255,255>, sta:<6,0>, prof:1, snd_ch_cfg:0x0
+I (2183) wifi:state: init -> auth (0xb0)
+I (2443) main_task: Returned from app_main()
+I (2873) watch: now 2026-10-24 19:17:36
+I (3183) wifi:state: auth -> init (0x200)
+W (3193) netlink: disconnected (reason 2), retry 1
+I (3933) imu: accel +0.029 +0.376 +0.840 g | raw 00FD 0C09 1AE4 | soft=61
+I (3933) imu: 58:00 00 00 00 | 60:00 00 00 00
+I (5493) wifi:state: init -> auth (0xb0)
+I (5503) wifi:state: auth -> assoc (0x0)
+I (5513) wifi:state: assoc -> run (0x10)
+I (5533) wifi:connected with 502, aid = 10, channel 6, BW20, bssid = 22:1b:7f:b6:1d:c2
+I (5533) wifi:security: WPA2-PSK, phy: bgn, rssi: -50, cipher(pairwise:0x3, group:0x3), pmf:0
+I (5543) wifi:pm start, type: 1
+
+I (5543) wifi:dp: 1, bi: 102400, li: 3, scale listen interval from 307200 us to 307200 us
+I (5553) wifi:set rx beacon pti, rx_bcn_pti: 0, bcn_timeout: 25000, mt_pti: 0, mt_time: 10000
+I (5573) wifi:AP's beacon interval = 102400 us, DTIM period = 1
+I (6683) esp_netif_handlers: sta ip: 192.168.2.238, mask: 255.255.255.0, gw: 192.168.2.1
+I (6683) netlink: online
+I (6683) minimax: chat: 你好，用一句话证明你在工作
+I (6723) wifi:<ba-add>idx:0 (ifx:0, 22:1b:7f:b6:1d:c2), tid:0, ssn:1, winSize:64
+I (6913) esp-x509-crt-bundle: Certificate validated
+I (6943) imu: accel +0.029 +0.371 +0.848 g | raw 00EA 0BE3 1B26 | soft=61
+I (6943) imu: 58:00 00 00 00 | 60:00 00 00 00
+I (8763) minimax: answer: 我正在正常运行，随时可以帮你解决问题。
+I (8763) voice: selftest OK: 我正在正常运行，随时可以帮你解决问题。
+I (8783) minimax: tts stream: 我正在正常运行，随时可以帮你解决问题。
+I (9013) esp-x509-crt-bundle: Certificate validated
+I (9943) imu: accel +0.031 +0.373 +0.852 g | raw 00EA 0BE3 1B2D | soft=61
+I (9943) imu: 58:00 00 00 00 | 60:00 00 00 00
+I (10073) watch: clock set to 2026-10-24 19:18:55
+I (10073) net: time synced: 2026-10-24 19:18:55
+I (10133) voice: first pcm after 1370 ms
+I (10303) watch: now 2026-10-24 19:18:55
+I (11723) esp-x509-crt-bundle: Certificate validated
+I (12953) imu: accel +0.029 +0.371 +0.848 g | raw 00EE 0BE0 1B26 | soft=61
+I (12953) imu: 58:00 00 00 00 | 60:00 00 00 00
+I (13013) weather: 南京 18℃ 晴, 湿度 89%, 风 9km/h, 今日 15~21℃
+I (13013) net: next refresh in 30 min
+I (15263) minimax: tts stream 124830 bytes (3900 ms audio), took 6479 ms
+I (15333) watch: now 2026-10-24 19:19:00
+I (15413) voice: selftest tts=ESP_OK, 124830 bytes

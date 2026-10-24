@@ -121,6 +121,15 @@ static void clock_from_software(rtc_time_t *t)
     t->weekday = pcf85063_weekday(year, (int)month, (int)day);
 }
 
+/* 取当前软件时钟（本地时间，SNTP 校准后为准）。
+ * 语音问答的本地意图（"现在几点"）直接用它，不走网络。 */
+void watch_get_time(rtc_time_t *out)
+{
+    if (out) {
+        clock_from_software(out);
+    }
+}
+
 void watch_set_time(time_t epoch){
     /* 先按当前时区换算成本地时间，否则会显示成 UTC */
     struct tm local;
@@ -189,31 +198,57 @@ typedef struct {
     bool pressed;
     uint16_t start_x;
     uint16_t start_y;
+    uint16_t last_x;
+    uint16_t last_y;
     int max_dx;
     int max_dy;
     int64_t press_start_us;
+    uint16_t samples;      /* 这次按压读到了几次（鬼触通常只出现 1 帧） */
 } gesture_state_t;
+
+/* 鬼触过滤参数：
+ *   - 按压至少持续 2 帧（约 40ms）才算数，单帧尖峰丢掉；
+ *   - 单帧坐标跳变超过 120px 视为噪声，不参与位移统计；
+ *   - 手势之间至少间隔 250ms，避免一次抖动连切好几页。 */
+#define GHOST_MIN_SAMPLES   2
+#define GHOST_MAX_JUMP      120
+#define GESTURE_COOLDOWN_US 250000
 
 static gesture_t gesture_feed(gesture_state_t *st, bool pressed_now, uint16_t x, uint16_t y)
 {
     gesture_t result = GESTURE_NONE;
+    static int64_t last_gesture_us;
 
     if (pressed_now) {
         if (!st->pressed) {
             st->start_x = x;
             st->start_y = y;
+            st->last_x = x;
+            st->last_y = y;
             st->max_dx = 0;
             st->max_dy = 0;
+            st->samples = 1;
             st->press_start_us = esp_timer_get_time();
+        } else if (st->samples < 0xFFFF) {
+            st->samples++;
         }
-        const int dx = (int)x - (int)st->start_x;
-        const int dy = (int)y - (int)st->start_y;
-        if (abs(dx) > abs(st->max_dx)) {
-            st->max_dx = dx;
+
+        /* 单帧跳变过大：噪声，只更新上一帧坐标，不累积位移 */
+        const int step_x = (int)x - (int)st->last_x;
+        const int step_y = (int)y - (int)st->last_y;
+        if (abs(step_x) <= GHOST_MAX_JUMP && abs(step_y) <= GHOST_MAX_JUMP) {
+            const int dx = (int)x - (int)st->start_x;
+            const int dy = (int)y - (int)st->start_y;
+            if (abs(dx) > abs(st->max_dx)) {
+                st->max_dx = dx;
+            }
+            if (abs(dy) > abs(st->max_dy)) {
+                st->max_dy = dy;
+            }
         }
-        if (abs(dy) > abs(st->max_dy)) {
-            st->max_dy = dy;
-        }
+        st->last_x = x;
+        st->last_y = y;
+
         st->pressed = true;
         return GESTURE_NONE;
     }
@@ -226,6 +261,13 @@ static gesture_t gesture_feed(gesture_state_t *st, bool pressed_now, uint16_t x,
     const int64_t held_ms = (esp_timer_get_time() - st->press_start_us) / 1000;
     const int ax = abs(st->max_dx);
     const int ay = abs(st->max_dy);
+
+    /* 太短 / 只有一帧：鬼触，丢掉 */
+    if (st->samples < GHOST_MIN_SAMPLES || held_ms < 30) {
+        st->max_dx = 0;
+        st->max_dy = 0;
+        return GESTURE_NONE;
+    }
 
     if (held_ms > 1000) {
         result = GESTURE_LONG_PRESS;
@@ -249,6 +291,16 @@ static gesture_t gesture_feed(gesture_state_t *st, bool pressed_now, uint16_t x,
 
     st->max_dx = 0;
     st->max_dy = 0;
+
+    /* 冷却：刚处理完一个手势，短时间内不认新的 */
+    if (result != GESTURE_NONE) {
+        const int64_t now = esp_timer_get_time();
+        if (now - last_gesture_us < GESTURE_COOLDOWN_US) {
+            return GESTURE_NONE;
+        }
+        last_gesture_us = now;
+    }
+
     return result;
 }
 
@@ -258,6 +310,7 @@ static gesture_t gesture_feed(gesture_state_t *st, bool pressed_now, uint16_t x,
 static bool s_ai_pressed;
 static int64_t s_ai_press_us;
 static face_t s_ai_last_face = FACE_COUNT;
+static uint8_t s_ai_samples;   /* AI 页的按压去抖：连续 2 帧才当真 */
 
 static void watch_task(void *arg)
 {
@@ -273,8 +326,6 @@ static void watch_task(void *arg)
     int last_minute = -1;
     int last_day = -1;
     int64_t last_batt_us = 0;
-
-    clock_from_build_time();
 
     /* 看门狗：主循环只要卡住超过 TWDT 超时（默认 5s）就自动重启，
      * 避免屏幕停在最后一帧、点什么都没反应。 */
@@ -408,14 +459,23 @@ static void watch_task(void *arg)
             }
 
             if (pressed_now && !s_ai_pressed) {
-                s_ai_pressed = true;
-                s_ai_press_us = esp_timer_get_time();
-                voice_ai_ptt_press();
-            } else if (!pressed_now && s_ai_pressed) {
-                s_ai_pressed = false;
-                const int64_t held_ms = (esp_timer_get_time() - s_ai_press_us) / 1000;
-                /* 按不到 0.35 秒当误触：取消录音，若手里有上一轮回答就重播 */
-                voice_ai_ptt_release(held_ms < 350);
+                /* 鬼触通常只有一帧，连续 2 帧（约 40ms）才当成真按下 */
+                if (s_ai_samples < 0xFF) {
+                    s_ai_samples++;
+                }
+                if (s_ai_samples >= 2) {
+                    s_ai_pressed = true;
+                    s_ai_press_us = esp_timer_get_time();
+                    voice_ai_ptt_press();
+                }
+            } else if (!pressed_now) {
+                s_ai_samples = 0;
+                if (s_ai_pressed) {
+                    s_ai_pressed = false;
+                    const int64_t held_ms = (esp_timer_get_time() - s_ai_press_us) / 1000;
+                    /* 按不到 0.5 秒当误触：取消录音，若手里有上一轮回答就重播 */
+                    voice_ai_ptt_release(held_ms < 500);
+                }
             }
 
             if (gesture == GESTURE_SWIPE_LEFT || gesture == GESTURE_SWIPE_RIGHT) {
@@ -484,6 +544,10 @@ static void watch_task(void *arg)
 
 void watch_app_start(void)
 {
+    /* 先把软件时钟播种好（用编译时间兜底），这样表盘任务起来之前
+     * 语音问答问"现在几点"也能拿到合理时间；SNTP 到了会再校准。 */
+    clock_from_build_time();
+
     display_clear(COLOR_BLACK);
     ui_text_center(160, "启动中...", 2, COLOR_GRAY);
 

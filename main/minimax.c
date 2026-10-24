@@ -18,10 +18,14 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
 #include "esp_crt_bundle.h"
 #include "esp_heap_caps.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 
 #include "ai_config.h"
 
@@ -31,6 +35,9 @@ static const char *TAG = "minimax";
 #define RESP_MAX_ASR    (64 * 1024)
 #define RESP_MAX_CHAT   (256 * 1024)
 #define RESP_MAX_TTS    (3 * 1024 * 1024)
+
+/* 流式 TTS 的单行缓冲（SSE 一行就是一个音频块，通常几百字节到几十 KB） */
+#define TTS_SSE_BUF     (256 * 1024)
 
 /* ---------------- 内存：优先 PSRAM ---------------- */
 
@@ -647,6 +654,211 @@ esp_err_t mm_tts(const char *text, mm_audio_t *out)
 
 out:
     mm_free(resp);
+    mm_free(body);
+    mm_free(esc);
+    mm_free(clean);
+    return err;
+}
+
+/* ---------------- 流式语音合成 ---------------- */
+
+/* 处理一行 SSE：data: {...}
+ * 注意顺序：先读 status / base_resp，再原地 hex 解码（解码会覆盖 JSON）。 */
+static bool tts_sse_line(char *line, mm_pcm_cb_t cb, void *ctx, bool *done, size_t *total)
+{
+    if (strncmp(line, "data:", 5) != 0) {
+        return true;   /* 空行 / 注释 */
+    }
+
+    char *json = line + 5;
+    while (*json == ' ') {
+        json++;
+    }
+    if (*json == '\0') {
+        return true;
+    }
+
+    const char *audio = find_value(json, "audio");
+    const char *hex = NULL;
+    size_t hexlen = 0;
+    if (audio && *audio == '"') {
+        hex = audio + 1;
+        while (hex[hexlen] && hex[hexlen] != '"') {
+            hexlen++;
+        }
+        if (hex[hexlen] != '"') {
+            hex = NULL;
+            hexlen = 0;
+        }
+    }
+
+    long st = 0;
+    const bool has_status = json_get_int(json, "status", &st);
+    if (!api_ok(json)) {
+        return false;
+    }
+
+    if (hex && hexlen >= 2) {
+        const size_t bytes = hexlen / 2;
+        for (size_t i = 0; i < bytes; i++) {
+            const int hi = hex_val(hex[2 * i]);
+            const int lo = hex_val(hex[2 * i + 1]);
+            if (hi < 0 || lo < 0) {
+                ESP_LOGE(TAG, "bad hex in stream");
+                return false;
+            }
+            line[i] = (char)((hi << 4) | lo);
+        }
+        *total += bytes;
+        if (!cb((const uint8_t *)line, bytes, ctx)) {
+            return false;   /* 调用者要求中止 */
+        }
+    }
+
+    if (has_status && st == 2) {
+        *done = true;
+    }
+    return true;
+}
+
+esp_err_t mm_tts_stream(const char *text, mm_pcm_cb_t cb, void *ctx)
+{
+    if (!mm_ready() || !text || !cb) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    const size_t clean_sz = (size_t)AI_TTS_MAX_CHARS * 4 + 16;
+    char *clean = mm_alloc(clean_sz);
+    char *esc = mm_alloc(clean_sz * 2);
+    char *body = mm_alloc(1024 + clean_sz * 2);
+    char *buf = mm_alloc(TTS_SSE_BUF);
+    if (!clean || !esc || !body || !buf) {
+        mm_free(clean);
+        mm_free(esc);
+        mm_free(body);
+        mm_free(buf);
+        return ESP_ERR_NO_MEM;
+    }
+
+    sanitize_for_tts(text, clean, clean_sz);
+    if (clean[0] == '\0') {
+        snprintf(clean, clean_sz, "抱歉，我没有生成出答案。");
+    }
+
+    esp_err_t err = ESP_FAIL;
+    esp_http_client_handle_t c = NULL;
+
+    if (!json_escape(clean, esc, clean_sz * 2)) {
+        goto out;
+    }
+
+    int n = snprintf(body, 1024 + clean_sz * 2,
+        "{\"model\":\"%s\",\"text\":\"%s\",\"stream\":true,"
+        "\"stream_options\":{\"exclude_aggregated_audio\":true},"
+        "\"output_format\":\"hex\","
+        "\"voice_setting\":{\"voice_id\":\"%s\",\"speed\":%.2f,\"vol\":1.0,\"pitch\":0},"
+        "\"audio_setting\":{\"sample_rate\":%d,\"format\":\"pcm\",\"channel\":1},"
+        "\"language_boost\":\"Chinese\"}",
+        MINIMAX_TTS_MODEL, esc, MINIMAX_TTS_VOICE, (double)MINIMAX_TTS_SPEED, AI_SAMPLE_RATE);
+
+    if (n <= 0 || (size_t)n >= 1024 + clean_sz * 2) {
+        ESP_LOGE(TAG, "tts stream request build failed");
+        goto out;
+    }
+
+    ESP_LOGI(TAG, "tts stream: %s", clean);
+
+    const int64_t t0 = esp_timer_get_time();
+    c = http_begin("/v1/t2a_v2", "application/json", (size_t)n, NULL);
+    if (!c) {
+        goto out;
+    }
+    if (!http_write_all(c, body, (size_t)n)) {
+        goto out;
+    }
+    esp_http_client_fetch_headers(c);
+
+    if (esp_http_client_get_status_code(c) != 200) {
+        ESP_LOGE(TAG, "tts stream HTTP %d", esp_http_client_get_status_code(c));
+        goto out;
+    }
+
+    size_t len = 0;
+    size_t total = 0;
+    bool done = false;
+    int stalls = 0;
+    err = ESP_OK;
+
+    while (!done) {
+        if (len + 2048 > TTS_SSE_BUF) {
+            ESP_LOGE(TAG, "sse line too long (%u)", (unsigned)len);
+            err = ESP_ERR_NO_MEM;
+            break;
+        }
+
+        const int r = esp_http_client_read(c, buf + len, 2048);
+        if (r < 0) {
+            ESP_LOGW(TAG, "tts stream read error");
+            err = ESP_FAIL;
+            break;
+        }
+        if (r == 0) {
+            if (esp_http_client_is_complete_data_received(c)) {
+                break;
+            }
+            if (++stalls > 300) {   /* ~3 秒没有新数据就放弃 */
+                ESP_LOGW(TAG, "tts stream stalled");
+                break;
+            }
+            vTaskDelay(pdMS_TO_TICKS(10));
+            continue;
+        }
+        stalls = 0;
+        len += (size_t)r;
+
+        size_t start = 0;
+        for (size_t i = 0; i < len; i++) {
+            if (buf[i] != '\n') {
+                continue;
+            }
+            size_t line_len = i - start;
+            if (line_len > 0 && buf[i - 1] == '\r') {
+                buf[i - 1] = '\0';
+                line_len--;
+            }
+            buf[i] = '\0';
+            if (!tts_sse_line(buf + start, cb, ctx, &done, &total)) {
+                err = ESP_FAIL;
+                goto stream_done;
+            }
+            start = i + 1;
+            if (done) {
+                break;
+            }
+        }
+
+        if (start > 0) {
+            memmove(buf, buf + start, len - start);
+            len -= start;
+        }
+    }
+
+stream_done:
+    if (total > 0) {
+        ESP_LOGI(TAG, "tts stream %u bytes (%u ms audio), took %d ms",
+                 (unsigned)total, (unsigned)(total * 1000 / (AI_SAMPLE_RATE * 2)),
+                 (int)((esp_timer_get_time() - t0) / 1000));
+    } else {
+        ESP_LOGW(TAG, "tts stream empty");
+        err = ESP_FAIL;
+    }
+
+out:
+    if (c) {
+        esp_http_client_close(c);
+        esp_http_client_cleanup(c);
+    }
+    mm_free(buf);
     mm_free(body);
     mm_free(esc);
     mm_free(clean);

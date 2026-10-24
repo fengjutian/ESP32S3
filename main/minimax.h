@@ -42,5 +42,14 @@ esp_err_t mm_chat(const char *user_text, char *reply, size_t reply_sz);
  */
 esp_err_t mm_tts(const char *text, mm_audio_t *out);
 
+/**
+ * @brief 流式语音合成：收到一段 PCM 就回调一次（边收边播）。
+ *
+ * @param cb  返回 false 表示立刻中止（用于"点一下打断"）
+ * @param ctx 原样传给回调
+ */
+typedef bool (*mm_pcm_cb_t)(const uint8_t *pcm, size_t bytes, void *ctx);
+esp_err_t mm_tts_stream(const char *text, mm_pcm_cb_t cb, void *ctx);
+
 /** @brief 释放 mm_* 返回的缓冲区。 */
 void mm_free(void *ptr);

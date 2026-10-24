@@ -38,5 +38,14 @@ esp_err_t audio_record_end(void);
  */
 esp_err_t audio_play(const int16_t *pcm, size_t samples, volatile bool *cancel);
 
+/**
+ * @brief 流式播放：开功放 -> 多次 audio_play_write() -> audio_play_end()。
+ *
+ * TTS 边收边播用这一组，收到第一段就能出声，不用等整段合成完。
+ */
+esp_err_t audio_play_begin(void);
+esp_err_t audio_play_write(const int16_t *pcm, size_t samples);
+esp_err_t audio_play_end(void);
+
 /** @brief 手动开关功放（调试用）。 */
 void audio_pa_enable(bool on);

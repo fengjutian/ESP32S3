@@ -2,11 +2,11 @@
  * 语音问答状态机。
  *
  * 一轮问答（全部在 ai 任务里串行）：
- *   按住 ──► 录音（16k 单声道，最长 8 秒）
- *   松手 ──► WAV 打包 → MiniMax ASR
- *          → 大模型 /v1/chat/completions
- *          → TTS /v1/t2a_v2（hex PCM）
- *          → ES8311 播放
+ *   按住 -> 录音（16k 单声道，最长 8 秒）
+ *   松手 -> WAV 打包 -> MiniMax ASR
+ *        -> 大模型 /v1/chat/completions
+ *        -> TTS /v1/t2a_v2（hex PCM）
+ *        -> ES8311 播放
  *
  * 表盘任务只调用 voice_ai_render() 画界面，两边用 s_mux 同步文字。
  *
@@ -25,10 +25,12 @@
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 
 #include "ai_config.h"
 #include "audio_io.h"
 #include "display.h"
+#include "local_intent.h"
 #include "minimax.h"
 #include "net_link.h"
 #include "ui.h"
@@ -56,11 +58,13 @@ static SemaphoreHandle_t s_mux;
 static volatile bool s_busy;
 static volatile bool s_stop;     /* 松手 */
 static volatile bool s_abort;    /* 取消 / 误触 */
+static volatile bool s_barge_in; /* 处理中再按 = 打断 */
 static volatile bool s_want_replay;
 static volatile int s_pending_cmd;
 static volatile bool s_dirty = true;
 
 static state_t s_state = ST_IDLE;
+static int64_t s_state_since_us;   /* 当前状态开始时间，用来在屏幕上显示已等待秒数 */
 static char s_status[32] = "按住说话";
 static char s_question[192];
 static char s_answer[768];
@@ -69,16 +73,46 @@ static char s_answer[768];
 static uint8_t *s_wav;
 static size_t s_wav_pcm_cap;
 
-/* 上一轮合成音频，用于重播（PSRAM） */
-static int16_t *s_last_pcm;
-static size_t s_last_samples;
+/* 本轮合成出来的 PCM（边收边播，同时留一份给"重播"），PSRAM */
+static uint8_t *s_pcm_buf;
+static size_t s_pcm_cap;
+static volatile size_t s_pcm_len;
+
+/* 测「从发起合成到第一块音频」的延迟 */
+static int64_t s_tts_req_us;
+static bool s_tts_first_done;
+
+/* 流式 TTS 回调：收到一块就写一块 I2S，返回 false 表示打断 */
+static bool tts_pcm_cb(const uint8_t *pcm, size_t bytes, void *ctx)
+{
+    (void)ctx;
+
+    if (s_abort) {
+        return false;
+    }
+    if (!s_tts_first_done) {
+        s_tts_first_done = true;
+        ESP_LOGI(TAG, "first pcm after %d ms", (int)((esp_timer_get_time() - s_tts_req_us) / 1000));
+    }
+    if (s_pcm_buf && s_pcm_len + bytes <= s_pcm_cap) {
+        memcpy(s_pcm_buf + s_pcm_len, pcm, bytes);
+        s_pcm_len += bytes;
+    }
+    if (audio_play_write((const int16_t *)pcm, bytes / 2) != ESP_OK) {
+        return false;
+    }
+    return !s_abort;
+}
 
 /* ---------------- 小工具 ---------------- */
 
 static void ui_set(state_t st, const char *status)
 {
     if (xSemaphoreTake(s_mux, pdMS_TO_TICKS(200)) == pdTRUE) {
-        s_state = st;
+        if (st != s_state) {
+            s_state = st;
+            s_state_since_us = esp_timer_get_time();
+        }
         if (status) {
             snprintf(s_status, sizeof(s_status), "%s", status);
         }
@@ -241,48 +275,39 @@ static void do_turn(void)
         goto out;
     }
 
-    /* ---- 3. 大模型 ---- */
-    ui_set(ST_THINK, "思考中…");
+    /* ---- 3. 能本地答的就别上云 ---- */
+    char answer[sizeof(s_answer)];
 
-    char *reply = heap_caps_malloc(sizeof(s_answer), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!reply) {
-        reply = malloc(sizeof(s_answer));
+    if (local_intent_match(question, answer, sizeof(answer))) {
+        ESP_LOGI(TAG, "local: %s", answer);
+        ui_set_answer(answer);
+    } else {
+        ui_set(ST_THINK, "思考中…");
+        if (mm_chat(question, answer, sizeof(answer)) != ESP_OK) {
+            ui_set(ST_ERROR, "大模型请求失败");
+            goto out;
+        }
+        ui_set_answer(answer);
     }
-    if (!reply) {
-        ui_set(ST_ERROR, "内存不足");
-        goto out;
-    }
-
-    if (mm_chat(question, reply, sizeof(s_answer)) != ESP_OK) {
-        free(reply);
-        ui_set(ST_ERROR, "大模型请求失败");
-        goto out;
-    }
-    ui_set_answer(reply);
 
     if (s_abort) {
-        free(reply);
         goto out;
     }
 
-    /* ---- 4. 合成并播放 ---- */
+    /* ---- 4. 流式合成并播放：收到第一段就出声 ---- */
     ui_set(ST_SPEAK, "回答中…");
 
-    mm_audio_t audio = {0};
-    if (mm_tts(reply, &audio) == ESP_OK && audio.len >= 2) {
-        if (s_last_pcm) {
-            mm_free(s_last_pcm);
+    if (!s_abort) {
+        s_pcm_len = 0;
+        s_tts_first_done = false;
+        s_tts_req_us = esp_timer_get_time();
+        audio_play_begin();
+        const esp_err_t tts_err = mm_tts_stream(answer, tts_pcm_cb, NULL);
+        audio_play_end();
+        if (tts_err != ESP_OK && !s_abort) {
+            ESP_LOGW(TAG, "tts stream failed (%s), keep text only", esp_err_to_name(tts_err));
         }
-        s_last_pcm = (int16_t *)audio.pcm;
-        s_last_samples = audio.len / 2;
-
-        if (!s_abort) {
-            audio_play(s_last_pcm, s_last_samples, &s_abort);
-        }
-    } else {
-        ESP_LOGW(TAG, "tts failed, keep text only");
     }
-    free(reply);
 
     ui_set(ST_IDLE, "按住说话");
 
@@ -300,13 +325,13 @@ out:
 
 static void do_replay(void)
 {
-    if (!s_last_pcm || s_last_samples == 0) {
+    if (!s_pcm_buf || s_pcm_len < 2) {
         ui_set(ST_ERROR, "还没有回答，先按住说话");
         return;
     }
     s_abort = false;
     ui_set(ST_SPEAK, "重播…");
-    audio_play(s_last_pcm, s_last_samples, &s_abort);
+    audio_play((const int16_t *)s_pcm_buf, s_pcm_len / 2, &s_abort);
     ui_set(ST_IDLE, "按住说话");
 }
 
@@ -314,6 +339,20 @@ static void do_replay(void)
 /* 开机自检：验证 key / 网关 / TLS / JSON 解析整条链路，只打日志 */
 static void ai_selftest(void)
 {
+    /* 先验证本地意图匹配 */
+    static const char *cases[] = {
+        "现在几点了", "今天几号", "今天天气怎么样", "还有多少电",
+        "我走了多少步", "你是谁", "谢谢", "讲个笑话",
+    };
+    char lbuf[192];
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        if (local_intent_match(cases[i], lbuf, sizeof(lbuf))) {
+            ESP_LOGI(TAG, "local[%s] -> %s", cases[i], lbuf);
+        } else {
+            ESP_LOGI(TAG, "local[%s] -> (cloud)", cases[i]);
+        }
+    }
+
     if (!mm_ready()) {
         ESP_LOGE(TAG, "selftest: no api key");
         return;
@@ -327,6 +366,15 @@ static void ai_selftest(void)
     const esp_err_t err = mm_chat("你好，用一句话证明你在工作", reply, sizeof(reply));
     if (err == ESP_OK) {
         ESP_LOGI(TAG, "selftest OK: %s", reply);
+
+        /* 顺带验证流式 TTS：应当马上从喇叭出声 */
+        s_pcm_len = 0;
+        s_tts_first_done = false;
+        s_tts_req_us = esp_timer_get_time();
+        audio_play_begin();
+        const esp_err_t terr = mm_tts_stream(reply, tts_pcm_cb, NULL);
+        audio_play_end();
+        ESP_LOGI(TAG, "selftest tts=%s, %u bytes", esp_err_to_name(terr), (unsigned)s_pcm_len);
     } else {
         ESP_LOGE(TAG, "selftest FAILED (err=%s)", esp_err_to_name(err));
     }
@@ -386,6 +434,14 @@ void voice_ai_init(void)
         return;
     }
 
+    /* 重播缓冲：最多留 16 秒合成音频（40 字回答约 5 秒，够用） */
+    s_pcm_cap = 512 * 1024;
+    s_pcm_buf = heap_caps_malloc(s_pcm_cap, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!s_pcm_buf) {
+        s_pcm_cap = 0;
+        ESP_LOGW(TAG, "no replay buffer, replay disabled");
+    }
+
     if (audio_init() != ESP_OK) {
         ESP_LOGE(TAG, "audio init failed, voice disabled");
     }
@@ -397,9 +453,17 @@ void voice_ai_init(void)
 
 void voice_ai_ptt_press(void)
 {
-    if (!s_cmd || s_busy) {
+    if (!s_cmd) {
         return;
     }
+    if (s_busy) {
+        /* 处理中再按一下 = 打断：停止播放、取消当前请求 */
+        s_abort = true;
+        s_stop = true;
+        s_barge_in = true;
+        return;
+    }
+    s_barge_in = false;
     s_stop = false;
     s_abort = false;
     s_busy = true;
@@ -410,12 +474,16 @@ void voice_ai_ptt_press(void)
 
 void voice_ai_ptt_release(bool discard)
 {
+    if (s_barge_in) {
+        s_barge_in = false;   /* 这次按下只是用来打断的，不当成说话 */
+        return;
+    }
     if (!s_busy) {
         return;
     }
     if (discard) {
         s_abort = true;
-        if (s_last_samples > 0) {
+        if (s_pcm_len >= 2) {
             s_want_replay = true;
         }
     }
@@ -531,7 +599,7 @@ static uint16_t state_color(state_t st)
 }
 
 /* 上次画到屏幕上的内容；只有变化的那一块才重画，避免全屏闪烁 */
-static char s_drawn_status[32];
+static char s_drawn_status[48];
 static char s_drawn_question[192];
 static char s_drawn_answer[768];
 static bool s_need_layout = true;
@@ -546,7 +614,12 @@ void voice_ai_render(const rtc_time_t *t)
 {
     (void)t;
 
-    if (!s_dirty || !s_mux) {
+    if (!s_mux) {
+        return;
+    }
+    /* 空闲且没变化就不用重画；处理中即使没有新内容也要走一遍，
+     * 因为要把「已等待秒数」刷到屏幕上（否则看起来像卡住）。 */
+    if (!s_dirty && s_state == ST_IDLE) {
         return;
     }
     if (xSemaphoreTake(s_mux, pdMS_TO_TICKS(50)) != pdTRUE) {
@@ -554,14 +627,26 @@ void voice_ai_render(const rtc_time_t *t)
     }
 
     const state_t st = s_state;
-    char status[sizeof(s_status)];
+    char status[48];
     char question[sizeof(s_question)];
     char answer[sizeof(s_answer)];
     snprintf(status, sizeof(status), "%s", s_status);
     snprintf(question, sizeof(question), "%s", s_question);
     snprintf(answer, sizeof(answer), "%s", s_answer);
+    const int64_t since_us = s_state_since_us;
     s_dirty = false;
     xSemaphoreGive(s_mux);
+
+    /* 处理中显示已经等了几秒，让屏幕一直在动 */
+    if (st != ST_IDLE && st != ST_ERROR) {
+        const int sec = (int)((esp_timer_get_time() - since_us) / 1000000);
+        if (sec > 0) {
+            const size_t n = strlen(status);
+            if (n + 8 < sizeof(status)) {
+                snprintf(status + n, sizeof(status) - n, " %ds", sec);
+            }
+        }
+    }
 
     /* 首次进入：整屏铺一次静态框架 */
     if (s_need_layout) {
@@ -573,7 +658,7 @@ void voice_ai_render(const rtc_time_t *t)
         display_clear(COLOR_BLACK);
         ui_text_center(22, "AI 助手", 1, COLOR_GRAY);
         display_fill_rect(60, 96, LCD_H_RES - 120, 2, 0x2104);
-        ui_text_center(336, "按住说话 · 轻点重播 · 滑动切换", 1, 0x4208);
+        ui_text_center(330, "按住说话 · 轻点重播", 1, 0x4208);
     }
 
     /* 状态行 */

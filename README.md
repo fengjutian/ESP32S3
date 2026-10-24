@@ -12,6 +12,7 @@
   - 极简：超大时间 + 秒数
   - 信息：电量 / 电压 / 时间 / 日期 / 运行时长
   - 天气：当前温度 / 天气描述 / 湿度 / 时间 / 日期
+  - 贪吃蛇：12×12 棋盘小游戏（滑动转向 / 轻触重开 / 长按退出）
 - **交互**：轻触切换表盘；长按 1 秒切换 12/24 小时制（**天气盘上长按 = 立即刷新**）
 - **省电**：30 秒无操作背光降到 15%，触摸立即恢复（LEDC PWM 调光）
 - **天气**：Open-Meteo 免费 API（不需要 key），含天气图标、今日高低温、湿度、风力；
@@ -144,13 +145,16 @@ RTC 仍会写入，但这块板上的 PCF85063 年份寄存器异常，**不读�
 
 | 文件 | 作用 |
 |---|---|
-| [main/display_config.h](main/display_config.h) | **硬件配置**：分辨率、QSPI 引脚、时钟、初始化版本、镜像/反色 |
+| [main/board_config.h](main/board_config.h) | **硬件配置**：分辨率、QSPI 引脚、时钟、初始化版本、镜像/反色 |
 | [main/display.c](main/display.c) | ST77916 初始化 + 填充 + 文本绘制（DMA 分行刷屏） |
 | [main/display.h](main/display.h) | API 与 RGB565 颜色宏 |
 | [main/st77916_init_cmds.h](main/st77916_init_cmds.h) | 厂商 v1（182 条）/ v2（185 条）初始化序列 |
 | [main/font8x16.h](main/font8x16.h) | 8×16 ASCII 点阵字模（字符 32~126，Consolas 14px 生成） |
-| [main/hello_world_main.c](main/hello_world_main.c) | `app_main`：初始化各外设并启动表盘、联网校时 |
-| [main/watch.c](main/watch.c) / [watch.h](main/watch.h) | 表盘应用：三种表盘、滑动切换、秒针圆环 |
+| [main/main.c](main/main.c) | `app_main`：初始化各外设并启动表盘、联网任务 |
+| [main/ui.c](main/ui.c) / [ui.h](main/ui.h) | UI 共享层：表盘枚举、共享状态、矢量绘制原语 |
+| [main/faces.c](main/faces.c) / [faces.h](main/faces.h) | 七个表盘的绘制实现与分发 |
+| [main/snake.c](main/snake.c) / [snake.h](main/snake.h) | 贪吃蛇游戏逻辑与增量渲染 |
+| [main/watch.c](main/watch.c) / [watch.h](main/watch.h) | 表盘主任务：软件时钟、手势、切换、背光省电 |
 | [main/touch.c](main/touch.c) / [touch.h](main/touch.h) | CST816S 触摸驱动（轮询读坐标） |
 | [main/rtc.c](main/rtc.c) / [rtc.h](main/rtc.h) | PCF85063 RTC 驱动（BCD 读写、掉电标志、星期计算） |
 | [main/bq27220.c](main/bq27220.c) / [bq27220.h](main/bq27220.h) | BQ27220 电量计（电压、电量百分比） |
@@ -162,7 +166,7 @@ RTC 仍会写入，但这块板上的 PCF85063 年份寄存器异常，**不读�
 
 ```c
 #include "display.h"
-#include "display_config.h"
+#include "board_config.h"
 
 display_init();                                   // 失败会返回错误码，不影响串口部分
 
@@ -179,7 +183,7 @@ int w = display_text_width("Hello World", 3);     // 计算宽度，便于居中
 
 ### 显示效果微调
 
-改 [main/display_config.h](main/display_config.h)，改完重新编译烧录即可：
+改 [main/board_config.h](main/board_config.h)，改完重新编译烧录即可：
 
 | 现象 | 改法 |
 |---|---|
@@ -262,20 +266,27 @@ hello_world/
 ├── pytest_hello_world.py          原示例的自动化测试脚本
 ├── main/
 │   ├── CMakeLists.txt             组件依赖清单
-│   ├── hello_world_main.c         应用入口：初始化 + 启动任务
-│   ├── app_config.h               WiFi 账号 / NTP / 时区
-│   ├── display.c / display.h      ST77916 显示驱动（文本、填充、圆环）
-│   ├── display_config.h           硬件配置（引脚、分辨率、时钟、触摸方向）
-│   ├── font8x16.h                 8×16 ASCII 字模
-│   ├── font16x16_zh.h             16×16 GB2312 中文字模（4437 字）
-│   ├── st77916_init_cmds.h        厂商初始化序列 v1 / v2
-│   ├── touch.c / touch.h          CST816S 触摸
+│   ├── main.c                     应用入口：初始化各外设并启动任务
+│   ├── app_config.h               WiFi 账号 / NTP / 时区 / 天气坐标
+│   ├── board_config.h             板级硬件配置（屏幕/触摸/I2C 引脚与参数）
+│   │
+│   ├── display.c / display.h      ST77916 面板驱动（初始化、填充、文本、圆环、行缓冲）
+│   ├── font8x16.h                 8×16 ASCII 字模（生成）
+│   ├── font16x16_zh.h             16×16 GB2312 中文字模（4437 字，生成）
+│   ├── st77916_init_cmds.h        厂商初始化序列 v1 / v2（生成）
+│   │
+│   ├── ui.c / ui.h                UI 共享层：表盘枚举、共享状态、文本与矢量绘制原语
+│   ├── faces.c / faces.h          七个表盘的绘制实现与分发
+│   ├── snake.c / snake.h          贪吃蛇小游戏（独立模块）
+│   ├── watch.c / watch.h          表盘主任务：软时钟、手势、切换、背光省电
+│   │
+│   ├── touch.c / touch.h          CST816S 触摸（基于官方 esp_lcd_touch）
 │   ├── rtc.c / rtc.h              PCF85063 实时时钟
-│   ├── bq27220.c / bq27220.h      BQ27220 电量计
-│   ├── wifi_time.c / wifi_time.h  WiFi + SNTP 后台校时
-│   ├── watch.c / watch.h          表盘应用
+│   ├── bq27220.c / bq27220.h      BQ27220 电量计（电压估算电量）
+│   ├── weather.c / weather.h      Open-Meteo 天气拉取与解析
+│   ├── wifi_time.c / wifi_time.h  WiFi + SNTP + 天气的后台任务
 │   ├── board_i2c.c / board_i2c.h  共享 I2C 总线
-│   └── idf_component.yml          组件管理器清单（espressif/esp_lcd_st77916 ^2.0.2）
+│   └── idf_component.yml          组件管理器清单（esp_lcd_st77916 / esp_lcd_touch / cst816s）
 └── managed_components/            组件管理器下载的依赖（已 gitignore）
 ```
 
@@ -285,10 +296,10 @@ hello_world/
 
 ## 7. 下一步可做
 
-- **指针式表盘**：在圆环内画时针/分针，用 `display_draw_line` 之类的原语扩展
-- **上 LVGL**：`lvgl/lvgl` + `espressif/esp_lvgl_port`，做更复杂的界面与动画
 - **IMU 手势**：QMI8658（I2C `0x6B`），抬腕亮屏 / 摇一摇换表盘
-- **低功耗**：息屏 + 触摸唤醒，延长电池续航
+- **上 LVGL**：`lvgl/lvgl` + `espressif/esp_lvgl_port`，做更复杂的界面与动画
+- **2048 / 俄罗斯方块**：再来一个小游戏，复用贪吃蛇的增量渲染框架
+- **音乐播放**：SD 卡 MP3 → ES8311 输出
 - **恢复出厂界面**：用微雪提供的固件包重新烧写
 
 ---

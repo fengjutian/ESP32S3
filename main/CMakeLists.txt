@@ -9,6 +9,7 @@ idf_component_register(
          "wifi_time.c"
          "ui.c"
          "faces.c"
+         "snake.c"
          "watch.c"
     PRIV_REQUIRES
          spi_flash

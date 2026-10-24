@@ -9,6 +9,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "board_config.h"
 #include "display.h"
 #include "rtc.h"
 
@@ -21,6 +22,7 @@ typedef enum {
     FACE_MINIMAL,      /* 极简：超大数字 */
     FACE_INFO,         /* 信息 */
     FACE_WEATHER,      /* 天气 */
+    FACE_SNAKE,        /* 贪吃蛇 */
     FACE_COUNT
 } face_t;
 

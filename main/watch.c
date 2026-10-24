@@ -21,6 +21,7 @@
 #include "display.h"
 #include "faces.h"
 #include "rtc.h"
+#include "snake.h"
 #include "touch.h"
 #include "ui.h"
 #include "watch.h"
@@ -30,6 +31,7 @@
 static const char *TAG = "watch";
 
 #define SWIPE_THRESHOLD   60        /* 横向位移超过这个像素才算滑动 */
+#define SNAKE_TURN_STEP   25        /* 贪吃蛇转向的最小位移 */
 #define IDLE_DIM_MS       30000     /* 无操作多久降亮度 */
 #define DIM_PERCENT       15
 
@@ -144,29 +146,39 @@ typedef enum {
     GESTURE_TAP,
     GESTURE_SWIPE_LEFT,
     GESTURE_SWIPE_RIGHT,
+    GESTURE_SWIPE_UP,
+    GESTURE_SWIPE_DOWN,
     GESTURE_LONG_PRESS,
 } gesture_t;
 
 typedef struct {
     bool pressed;
     uint16_t start_x;
+    uint16_t start_y;
     int max_dx;
+    int max_dy;
     int64_t press_start_us;
 } gesture_state_t;
 
-static gesture_t gesture_feed(gesture_state_t *st, bool pressed_now, uint16_t x)
+static gesture_t gesture_feed(gesture_state_t *st, bool pressed_now, uint16_t x, uint16_t y)
 {
     gesture_t result = GESTURE_NONE;
 
     if (pressed_now) {
         if (!st->pressed) {
             st->start_x = x;
+            st->start_y = y;
             st->max_dx = 0;
+            st->max_dy = 0;
             st->press_start_us = esp_timer_get_time();
         }
         const int dx = (int)x - (int)st->start_x;
+        const int dy = (int)y - (int)st->start_y;
         if (abs(dx) > abs(st->max_dx)) {
             st->max_dx = dx;
+        }
+        if (abs(dy) > abs(st->max_dy)) {
+            st->max_dy = dy;
         }
         st->pressed = true;
         return GESTURE_NONE;
@@ -178,17 +190,31 @@ static gesture_t gesture_feed(gesture_state_t *st, bool pressed_now, uint16_t x)
 
     st->pressed = false;
     const int64_t held_ms = (esp_timer_get_time() - st->press_start_us) / 1000;
+    const int ax = abs(st->max_dx);
+    const int ay = abs(st->max_dy);
 
     if (held_ms > 1000) {
         result = GESTURE_LONG_PRESS;
-    } else if (st->max_dx <= -SWIPE_THRESHOLD) {
-        result = GESTURE_SWIPE_LEFT;
-    } else if (st->max_dx >= SWIPE_THRESHOLD) {
-        result = GESTURE_SWIPE_RIGHT;
+    } else if (ax >= ay) {
+        if (st->max_dx <= -SWIPE_THRESHOLD) {
+            result = GESTURE_SWIPE_LEFT;
+        } else if (st->max_dx >= SWIPE_THRESHOLD) {
+            result = GESTURE_SWIPE_RIGHT;
+        } else {
+            result = GESTURE_TAP;
+        }
     } else {
-        result = GESTURE_TAP;
+        if (st->max_dy <= -SWIPE_THRESHOLD) {
+            result = GESTURE_SWIPE_UP;
+        } else if (st->max_dy >= SWIPE_THRESHOLD) {
+            result = GESTURE_SWIPE_DOWN;
+        } else {
+            result = GESTURE_TAP;
+        }
     }
+
     st->max_dx = 0;
+    st->max_dy = 0;
     return result;
 }
 
@@ -199,6 +225,11 @@ static void watch_task(void *arg)
     (void)arg;
 
     gesture_state_t touch = {0};
+    struct {
+        bool active;
+        uint16_t x;
+        uint16_t y;
+    } snake_touch = {0};
     int64_t last_input_us = esp_timer_get_time();
     bool dimmed = false;
     uint32_t last_weather_seq = 0;
@@ -253,37 +284,88 @@ static void watch_task(void *arg)
             face_render(FACE_WEATHER, &now, true);
         }
 
+        /* 贪吃蛇需要比 1Hz 更快的节拍 */
+        if (ui_face == FACE_SNAKE) {
+            snake_poll();
+        }
+
         /* 触摸手势 */
         touch_point_t pt;
         const bool pressed_now = touch_read(&pt);
-        switch (gesture_feed(&touch, pressed_now, pt.x)) {
-        case GESTURE_LONG_PRESS:
-            if (ui_face == FACE_WEATHER) {
-                net_request_refresh();
-                ESP_LOGI(TAG, "weather refresh requested");
+        const gesture_t gesture = gesture_feed(&touch, pressed_now, pt.x, pt.y);
+
+        /* 贪吃蛇：按下后位移超过阈值立即转向，不需要抬手 */
+        if (ui_face == FACE_SNAKE) {
+            if (pressed_now) {
+                if (!snake_touch.active) {
+                    snake_touch.active = true;
+                    snake_touch.x = pt.x;
+                    snake_touch.y = pt.y;
+                }
+                const int dx = (int)pt.x - (int)snake_touch.x;
+                const int dy = (int)pt.y - (int)snake_touch.y;
+                if (abs(dx) >= SNAKE_TURN_STEP || abs(dy) >= SNAKE_TURN_STEP) {
+                    if (abs(dx) >= abs(dy)) {
+                        snake_turn(dx > 0 ? 1 : -1, 0);
+                    } else {
+                        snake_turn(0, dy > 0 ? 1 : -1);
+                    }
+                    snake_touch.x = pt.x;
+                    snake_touch.y = pt.y;
+                }
             } else {
-                ui_h24 = !ui_h24;
-                ESP_LOGI(TAG, "long press -> %s", ui_h24 ? "24h" : "12h");
-                face_render(ui_face, &now, true);
+                snake_touch.active = false;
             }
-            break;
+        }
 
-        case GESTURE_SWIPE_RIGHT:
-            ui_face = (face_t)((ui_face + FACE_COUNT - 1) % FACE_COUNT);
-            ESP_LOGI(TAG, "swipe right -> %s", ui_face_name[ui_face]);
-            face_render(ui_face, &now, true);
-            break;
+        if (ui_face == FACE_SNAKE) {
+            /* 贪吃蛇：滑动转向、结束后轻触重开、长按退出 */
+            switch (gesture) {
+            case GESTURE_TAP:
+                if (snake_is_over()) {
+                    ESP_LOGI(TAG, "snake: restart");
+                    snake_start();
+                }
+                break;
+            case GESTURE_LONG_PRESS:
+                ui_face = (face_t)((ui_face + 1) % FACE_COUNT);
+                ESP_LOGI(TAG, "exit game -> %s", ui_face_name[ui_face]);
+                face_render(ui_face, &now, true);
+                break;
+            default:
+                break;
+            }
+        } else {
+            switch (gesture) {
+            case GESTURE_LONG_PRESS:
+                if (ui_face == FACE_WEATHER) {
+                    net_request_refresh();
+                    ESP_LOGI(TAG, "weather refresh requested");
+                } else {
+                    ui_h24 = !ui_h24;
+                    ESP_LOGI(TAG, "long press -> %s", ui_h24 ? "24h" : "12h");
+                    face_render(ui_face, &now, true);
+                }
+                break;
 
-        case GESTURE_TAP:
-        case GESTURE_SWIPE_LEFT:
-            ui_face = (face_t)((ui_face + 1) % FACE_COUNT);
-            ESP_LOGI(TAG, "%s -> %s",
-                     (ui_face == FACE_ANALOG) ? "tap" : "next", ui_face_name[ui_face]);
-            face_render(ui_face, &now, true);
-            break;
+            case GESTURE_SWIPE_RIGHT:
+                ui_face = (face_t)((ui_face + FACE_COUNT - 1) % FACE_COUNT);
+                ESP_LOGI(TAG, "swipe right -> %s", ui_face_name[ui_face]);
+                face_render(ui_face, &now, true);
+                break;
 
-        default:
-            break;
+            case GESTURE_TAP:
+            case GESTURE_SWIPE_LEFT:
+                ui_face = (face_t)((ui_face + 1) % FACE_COUNT);
+                ESP_LOGI(TAG, "%s -> %s",
+                         (gesture == GESTURE_TAP) ? "tap" : "swipe left",
+                         ui_face_name[ui_face]);
+                face_render(ui_face, &now, true);
+                break;
+
+            default:
+                break;
+            }
         }
 
         /* 30 秒无操作 → 降亮度 */

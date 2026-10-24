@@ -18,6 +18,7 @@
 
 #include "app_config.h"
 #include "display.h"
+#include "snake.h"
 #include "ui.h"
 #include "weather.h"
 
@@ -483,6 +484,9 @@ void face_render(face_t face, const rtc_time_t *t, bool full)
         break;
     case FACE_WEATHER:
         weather_render(t);
+        break;
+    case FACE_SNAKE:
+        snake_start();
         break;
     default:
         break;

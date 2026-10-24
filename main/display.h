@@ -35,6 +35,11 @@ esp_err_t display_init(void);
 void display_backlight(bool on);
 
 /**
+ * @brief 设置背光亮度（0~100，使用 LEDC PWM）。
+ */
+void display_set_backlight(int percent);
+
+/**
  * @brief 用纯色填充一个矩形（会自动裁剪到屏幕范围内）。
  */
 void display_fill_rect(int x, int y, int w, int h, uint16_t color);

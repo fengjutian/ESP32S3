@@ -1,109 +1,96 @@
 /*
- * CST816S 电容触摸驱动（最小实现）。
+ * CST816S 电容触摸驱动（基于乐鑫官方 esp_lcd_touch + esp_lcd_touch_cst816s 组件）。
  *
- * 寄存器（从 0x01 起连续读 6 字节）：
- *   [0] 0x01 FingerNum   [1] 0x02 XposH   [2] 0x03 XposL
- *   [3] 0x04 YposH       [4] 0x05 YposL   [5] 0x06 Event
+ * 之前手写寄存器解析会读到 f=5 / y=2560 之类的垃圾数据，并因读取偶发失败
+ * 产生大量虚假的按下/松开；改用官方组件后协议由组件维护。
+ * 另外这里加了抬手去抖：连续 3 次读不到触点才认为手指抬起。
  *
  * SPDX-License-Identifier: CC0-1.0
  */
 
 #include "touch.h"
 
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-
-#include "driver/gpio.h"
-#include "driver/i2c_master.h"
-
 #include "esp_check.h"
 #include "esp_log.h"
+
+#include "esp_lcd_touch.h"
+#include "esp_lcd_touch_cst816s.h"
 
 #include "board_i2c.h"
 #include "display_config.h"
 
 static const char *TAG = "touch";
 
-#define REG_FINGER_NUM      0x01
-#define REG_EVENT           0x06
+#define RELEASE_DEBOUNCE    3   /* 连续几次读不到触点才算抬手 */
 
-#define EVENT_DOWN          0x00
-#define EVENT_UP            0x01
-#define EVENT_CONTACT       0x02
-
-static i2c_master_dev_handle_t s_dev;
+static esp_lcd_touch_handle_t s_tp;
+static bool s_last_pressed;
+static uint8_t s_release_cnt;
 
 esp_err_t touch_init(void)
 {
-    /* CST816S 复位：RST 拉低 10ms，放开后等 50ms */
-    gpio_config_t rst_cfg = {
-        .pin_bit_mask = 1ULL << TOUCH_PIN_RST,
-        .mode = GPIO_MODE_OUTPUT,
-    };
-    gpio_config(&rst_cfg);
-    gpio_set_level(TOUCH_PIN_RST, 0);
-    vTaskDelay(pdMS_TO_TICKS(10));
-    gpio_set_level(TOUCH_PIN_RST, 1);
-    vTaskDelay(pdMS_TO_TICKS(50));
-
     ESP_RETURN_ON_ERROR(board_i2c_init(), TAG, "i2c bus init failed");
-    ESP_RETURN_ON_ERROR(board_i2c_add_device(TOUCH_I2C_ADDR, TOUCH_I2C_HZ, &s_dev),
-                        TAG, "add CST816S device failed");
 
-    uint8_t reg = REG_FINGER_NUM;
-    uint8_t dummy = 0;
-    esp_err_t probe = i2c_master_transmit_receive(s_dev, &reg, 1, &dummy, 1, 100);
-    if (probe != ESP_OK) {
-        ESP_LOGE(TAG, "CST816S not responding at 0x%02X (%s)", TOUCH_I2C_ADDR, esp_err_to_name(probe));
-        return probe;
-    }
+    esp_lcd_panel_io_handle_t tp_io = NULL;
+    esp_lcd_panel_io_i2c_config_t io_cfg = ESP_LCD_TOUCH_IO_I2C_CST816S_CONFIG();
+    ESP_RETURN_ON_ERROR(esp_lcd_new_panel_io_i2c(board_i2c_handle(), &io_cfg, &tp_io),
+                        TAG, "new panel io failed");
 
-    ESP_LOGI(TAG, "CST816S ready at 0x%02X", TOUCH_I2C_ADDR);
+    esp_lcd_touch_config_t tp_cfg = {
+        .x_max = LCD_H_RES,
+        .y_max = LCD_V_RES,
+        .rst_gpio_num = TOUCH_PIN_RST,
+        .int_gpio_num = TOUCH_PIN_INT,
+        .levels = {
+            .reset = 0,
+            .interrupt = 0,
+        },
+        .flags = {
+            .swap_xy = TOUCH_SWAP_XY,
+            .mirror_x = TOUCH_MIRROR_X,
+            .mirror_y = TOUCH_MIRROR_Y,
+        },
+    };
+
+    ESP_RETURN_ON_ERROR(esp_lcd_touch_new_i2c_cst816s(tp_io, &tp_cfg, &s_tp),
+                        TAG, "cst816s init failed");
+
+    ESP_LOGI(TAG, "CST816S ready (esp_lcd_touch driver)");
     return ESP_OK;
 }
 
 bool touch_read(touch_point_t *pt)
 {
-    if (!s_dev || !pt) {
+    if (!s_tp || !pt) {
         return false;
     }
 
-    uint8_t reg = REG_FINGER_NUM;
-    uint8_t buf[6] = {0};
-    if (i2c_master_transmit_receive(s_dev, &reg, 1, buf, sizeof(buf), 50) != ESP_OK) {
-        return false;
+    uint16_t x = 0, y = 0;
+    uint8_t count = 0;
+    bool touched = false;
+
+    if (esp_lcd_touch_read_data(s_tp) == ESP_OK) {
+        touched = esp_lcd_touch_get_coordinates(s_tp, &x, &y, NULL, &count, 1);
     }
 
-    const uint8_t fingers = buf[0] & 0x0F;
-    const uint8_t event = buf[5] & 0x03;
-
-    if (fingers == 0 || event == EVENT_UP) {
-        pt->pressed = false;
-        return false;
+    if (touched && count > 0) {
+        s_release_cnt = 0;
+        s_last_pressed = true;
+        pt->x = (x < LCD_H_RES) ? x : (uint16_t)(LCD_H_RES - 1);
+        pt->y = (y < LCD_V_RES) ? y : (uint16_t)(LCD_V_RES - 1);
+        pt->pressed = true;
+        return true;
     }
-    (void)EVENT_DOWN;
-    (void)EVENT_CONTACT;
 
-    uint16_t x = (uint16_t)(((buf[1] & 0x0F) << 8) | buf[2]);
-    uint16_t y = (uint16_t)(((buf[3] & 0x0F) << 8) | buf[4]);
+    /* 抬手去抖：偶发读失败不当作抬手 */
+    if (s_last_pressed) {
+        if (++s_release_cnt < RELEASE_DEBOUNCE) {
+            pt->pressed = true;
+            return true;
+        }
+        s_last_pressed = false;
+    }
 
-#if TOUCH_SWAP_XY
-    uint16_t t = x;
-    x = y;
-    y = t;
-#endif
-#if TOUCH_MIRROR_X
-    x = (uint16_t)((LCD_H_RES - 1) - x);
-#endif
-#if TOUCH_MIRROR_Y
-    y = (uint16_t)((LCD_V_RES - 1) - y);
-#endif
-
-    if (x >= LCD_H_RES) x = LCD_H_RES - 1;
-    if (y >= LCD_V_RES) y = LCD_V_RES - 1;
-
-    pt->x = x;
-    pt->y = y;
-    pt->pressed = true;
-    return true;
+    pt->pressed = false;
+    return false;
 }

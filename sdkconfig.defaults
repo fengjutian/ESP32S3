@@ -2,3 +2,7 @@
 # Keeping this here (instead of only in sdkconfig, which is gitignored)
 # makes the setting survive "idf.py set-target" and fresh checkouts.
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+
+# 自定义分区表：app 分区放大到 4MB（默认 1MB 已经快装不下 WiFi + 中文字库）
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"

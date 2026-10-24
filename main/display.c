@@ -14,6 +14,7 @@
 #include "freertos/semphr.h"
 
 #include "driver/gpio.h"
+#include "driver/ledc.h"
 #include "driver/spi_master.h"
 
 #include "esp_check.h"
@@ -42,6 +43,8 @@ static esp_lcd_panel_io_handle_t s_io;
 static esp_lcd_panel_handle_t s_panel;
 static SemaphoreHandle_t s_flush_done;
 static uint16_t *s_strip;   /* LINE_CHUNK 行 × 屏宽 的像素缓冲 */
+
+static esp_err_t backlight_init(void);
 
 static bool on_color_trans_done(esp_lcd_panel_io_handle_t io,
                                 esp_lcd_panel_io_event_data_t *edata,
@@ -212,23 +215,68 @@ esp_err_t display_init(void)
     s_strip = heap_caps_malloc((size_t)LCD_H_RES * LINE_CHUNK * sizeof(uint16_t), MALLOC_CAP_DMA);
     ESP_RETURN_ON_FALSE(s_strip, ESP_ERR_NO_MEM, TAG, "no memory for strip buffer");
 
-    display_backlight(true);
+    ESP_RETURN_ON_ERROR(backlight_init(), TAG, "backlight init failed");
+    display_set_backlight(100);
     ESP_LOGI(TAG, "panel ready: %dx%d (ST77916 QSPI, %s)", LCD_H_RES, LCD_V_RES, ver_name);
     return ESP_OK;
 }
 
-void display_backlight(bool on)
+/* ---------------- 背光（LEDC PWM） ---------------- */
+
+#define BL_MODE         LEDC_LOW_SPEED_MODE
+#define BL_TIMER        LEDC_TIMER_0
+#define BL_CHANNEL      LEDC_CHANNEL_0
+#define BL_DUTY_MAX     1023   /* 10 bit */
+
+static bool s_bl_ready;
+
+static esp_err_t backlight_init(void)
 {
 #if (LCD_PIN_BL >= 0)
-    gpio_config_t cfg = {
-        .pin_bit_mask = 1ULL << LCD_PIN_BL,
-        .mode = GPIO_MODE_OUTPUT,
+    ledc_timer_config_t tcfg = {
+        .speed_mode = BL_MODE,
+        .timer_num = BL_TIMER,
+        .duty_resolution = LEDC_TIMER_10_BIT,
+        .freq_hz = 5000,
+        .clk_cfg = LEDC_AUTO_CLK,
     };
-    gpio_config(&cfg);
-    gpio_set_level(LCD_PIN_BL, on ? 1 : 0);
-#else
-    (void)on;
+    ESP_RETURN_ON_ERROR(ledc_timer_config(&tcfg), TAG, "ledc timer config failed");
+
+    ledc_channel_config_t ccfg = {
+        .gpio_num = LCD_PIN_BL,
+        .speed_mode = BL_MODE,
+        .channel = BL_CHANNEL,
+        .timer_sel = BL_TIMER,
+        .duty = 0,
+        .hpoint = 0,
+    };
+    ESP_RETURN_ON_ERROR(ledc_channel_config(&ccfg), TAG, "ledc channel config failed");
+
+    s_bl_ready = true;
 #endif
+    return ESP_OK;
+}
+
+void display_set_backlight(int percent)
+{
+#if (LCD_PIN_BL >= 0)
+    if (!s_bl_ready) {
+        return;
+    }
+    if (percent < 0) percent = 0;
+    if (percent > 100) percent = 100;
+
+    const uint32_t duty = (uint32_t)((BL_DUTY_MAX * percent) / 100);
+    ledc_set_duty(BL_MODE, BL_CHANNEL, duty);
+    ledc_update_duty(BL_MODE, BL_CHANNEL);
+#else
+    (void)percent;
+#endif
+}
+
+void display_backlight(bool on)
+{
+    display_set_backlight(on ? 100 : 0);
 }
 
 /* 用纯色填充矩形，按 LINE_CHUNK 行分批 DMA */
@@ -527,8 +575,10 @@ void display_draw_arc(int cx, int cy, int radius, int thickness,
     const int r_out2 = radius * radius;
     const int r_in2 = r_in * r_in;
 
-    /* 扇形包围盒：沿角度采样外圈端点，再按环宽外扩 */
-    int minx = cx, maxx = cx, miny = cy, maxy = cy;
+    /* 扇形包围盒：只沿角度采样外圈端点（不要把圆心算进去，否则包围盒会
+     * 撑成「圆心→边缘」的大矩形，重绘时会把圆环其余部分和文字一起涂掉） */
+    int minx = INT32_MAX, maxx = INT32_MIN;
+    int miny = INT32_MAX, maxy = INT32_MIN;
     for (int a = a0; a <= a1; a += 2) {
         const float rad = (float)a * 3.14159265f / 180.0f;
         const int x = cx + (int)(sinf(rad) * (float)radius);
@@ -538,6 +588,7 @@ void display_draw_arc(int cx, int cy, int radius, int thickness,
         if (y < miny) miny = y;
         if (y > maxy) maxy = y;
     }
+    /* 再按环宽外扩 */
     minx -= thickness;
     maxx += thickness;
     miny -= thickness;

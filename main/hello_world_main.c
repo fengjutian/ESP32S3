@@ -22,6 +22,7 @@
 #include "rtc.h"
 #include "touch.h"
 #include "watch.h"
+#include "weather.h"
 #include "wifi_time.h"
 
 static const char *TAG = "app";
@@ -89,6 +90,7 @@ void app_main(void)
     /* 表盘 */
     watch_app_start();
 
-    /* 后台联网校时（没配 WiFi 就自动跳过） */
+    /* 天气缓存 + 后台联网（校时、拉天气） */
+    weather_init();
     time_sync_start();
 }

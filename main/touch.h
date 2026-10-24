@@ -1,5 +1,5 @@
 /*
- * CST816S 电容触摸驱动（最小实现，轮询方式读取坐标）。
+ * CST816S 电容触摸驱动（基于 esp_lcd_touch 组件）。
  *
  * SPDX-License-Identifier: CC0-1.0
  */
@@ -17,17 +17,15 @@ typedef struct {
 } touch_point_t;
 
 /**
- * @brief 初始化 I2C 总线并复位 CST816S。
- *
- * @return ESP_OK 成功；ESP_ERR_NOT_FOUND 表示总线上没有应答。
+ * @brief 初始化触摸（内部会确保 I2C 总线已就绪）。
  */
 esp_err_t touch_init(void);
 
 /**
- * @brief 读取一次触摸状态。
+ * @brief 读取一次触摸状态（含抬手去抖）。
  *
  * @param[out] pt 坐标与按下状态
- * @return true  本次检测到按下（可用于触发一次点击动作）
- * @return false 没有触摸或读取失败
+ * @return true  当前处于按下状态
+ * @return false 已抬起或读取失败
  */
 bool touch_read(touch_point_t *pt);

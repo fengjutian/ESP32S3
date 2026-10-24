@@ -19,3 +19,12 @@
 
 /* POSIX 时区字符串：CST-8 = 中国标准时间（UTC+8） */
 #define APP_TZ              "CST-8"
+
+/* ---- 天气（Open-Meteo，免费且不需要 API key） ---- */
+/* 南京（32.0603N, 118.7969E） */
+#define WEATHER_CITY            "南京"
+#define WEATHER_LAT             32.0603f
+#define WEATHER_LON             118.7969f
+
+/* 天气刷新周期（分钟）。每次刷新会临时开 WiFi，约 6 秒 */
+#define WEATHER_REFRESH_MIN     30

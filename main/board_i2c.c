@@ -48,3 +48,8 @@ esp_err_t board_i2c_add_device(uint8_t addr, uint32_t scl_hz, i2c_master_dev_han
     };
     return i2c_master_bus_add_device(s_bus, &dev_cfg, out);
 }
+
+i2c_master_bus_handle_t board_i2c_handle(void)
+{
+    return s_bus;
+}

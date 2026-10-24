@@ -1,8 +1,5 @@
 /*
- * 后台联网校时。
- *
- * 流程：STA 连接 WiFi -> 等 IP -> SNTP 同步 -> 写入 PCF85063 -> 关掉 WiFi。
- * 任何一步失败都不影响表盘（RTC 继续走时）。
+ * 后台联网任务：连 WiFi → SNTP 校时 → 拉天气 → 关 WiFi，然后周期性重复。
  *
  * SPDX-License-Identifier: CC0-1.0
  */
@@ -23,9 +20,10 @@
 #include "app_config.h"
 #include "rtc.h"
 #include "watch.h"
+#include "weather.h"
 #include "wifi_time.h"
 
-static const char *TAG = "time_sync";
+static const char *TAG = "net";
 
 #define WIFI_CONNECTED_BIT  BIT0
 #define WIFI_FAILED_BIT     BIT1
@@ -34,14 +32,22 @@ static const char *TAG = "time_sync";
 #define SNTP_TIMEOUT_MS     20000
 
 static EventGroupHandle_t s_events;
+static SemaphoreHandle_t s_refresh_req;
 static int s_retry;
 static volatile bool s_shutting_down;
+
+void net_request_refresh(void)
+{
+    if (s_refresh_req) {
+        xSemaphoreGive(s_refresh_req);
+    }
+}
 
 static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         if (s_shutting_down) {
-            return;   /* 我们自己调用了 esp_wifi_stop()，不是异常断开 */
+            return;   /* 我们自己调用了 esp_wifi_stop() */
         }
         const wifi_event_sta_disconnected_t *ev = (wifi_event_sta_disconnected_t *)data;
         if (++s_retry <= 3) {
@@ -56,61 +62,56 @@ static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, voi
     }
 }
 
-/* 扫描一次，列出周围所有 2.4G 热点，并标出目标 SSID 是否存在 */
-static void scan_ap(void)
+/* 校时：成功则同时更新软件时钟和 RTC */
+static void do_sntp(void)
 {
-    wifi_scan_config_t scan_cfg = {
-        .ssid = NULL,          /* 扫描全部 */
-        .show_hidden = false,
-    };
-
-    if (esp_wifi_scan_start(&scan_cfg, true) != ESP_OK) {
-        ESP_LOGW(TAG, "scan failed");
+    esp_sntp_config_t cfg = ESP_NETIF_SNTP_DEFAULT_CONFIG(APP_NTP_SERVER);
+    if (esp_netif_sntp_init(&cfg) != ESP_OK) {
+        ESP_LOGW(TAG, "sntp init failed");
         return;
     }
 
-    uint16_t ap_num = 0;
-    esp_wifi_scan_get_ap_num(&ap_num);
-    if (ap_num == 0) {
-        ESP_LOGW(TAG, "no AP found at all");
-        return;
+    if (esp_netif_sntp_sync_wait(pdMS_TO_TICKS(SNTP_TIMEOUT_MS)) == ESP_OK) {
+        setenv("TZ", APP_TZ, 1);
+        tzset();
+
+        const time_t epoch = time(NULL);
+        struct tm local;
+        localtime_r(&epoch, &local);
+
+        watch_set_time(epoch);
+
+        rtc_time_t t = {
+            .year = local.tm_year + 1900,
+            .month = local.tm_mon + 1,
+            .day = local.tm_mday,
+            .hour = local.tm_hour,
+            .minute = local.tm_min,
+            .second = local.tm_sec,
+        };
+        pcf85063_write(&t);
+
+        ESP_LOGI(TAG, "time synced: %04d-%02d-%02d %02d:%02d:%02d",
+                 t.year, t.month, t.day, t.hour, t.minute, t.second);
+    } else {
+        ESP_LOGW(TAG, "SNTP timeout");
     }
 
-    wifi_ap_record_t *recs = calloc(ap_num, sizeof(wifi_ap_record_t));
-    if (!recs) {
-        return;
-    }
-    esp_wifi_scan_get_ap_records(&ap_num, recs);
-
-    ESP_LOGI(TAG, "---- %u AP(s) visible in 2.4GHz ----", (unsigned)ap_num);
-    bool found = false;
-    for (int i = 0; i < ap_num; i++) {
-        const bool match = (strcmp((const char *)recs[i].ssid, APP_WIFI_SSID) == 0);
-        if (match) {
-            found = true;
-        }
-        ESP_LOGI(TAG, "%s \"%s\"  rssi=%d  ch=%d  auth=%d",
-                 match ? "->" : "  ", (const char *)recs[i].ssid,
-                 recs[i].rssi, recs[i].primary, recs[i].authmode);
-    }
-    free(recs);
-
-    if (!found) {
-        ESP_LOGW(TAG, "target \"%s\" NOT in the list above", APP_WIFI_SSID);
-    }
+    esp_netif_sntp_deinit();
 }
 
-static void time_sync_task(void *arg)
+static void net_task(void *arg)
 {
     (void)arg;
 
     if (strlen(APP_WIFI_SSID) == 0) {
-        ESP_LOGW(TAG, "no WiFi credentials in main/app_config.h, skipping sync");
+        ESP_LOGW(TAG, "no WiFi credentials in main/app_config.h, skipping network");
         vTaskDelete(NULL);
         return;
     }
 
     s_events = xEventGroupCreate();
+    s_refresh_req = xSemaphoreCreateBinary();
 
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
@@ -132,69 +133,43 @@ static void time_sync_task(void *arg)
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_cfg));
-    ESP_ERROR_CHECK(esp_wifi_start());
 
-    ESP_LOGI(TAG, "connecting to \"%s\"...", APP_WIFI_SSID);
+    for (;;) {
+        s_retry = 0;
+        s_shutting_down = false;
+        xEventGroupClearBits(s_events, WIFI_CONNECTED_BIT | WIFI_FAILED_BIT);
 
-    scan_ap();
-    esp_wifi_connect();
+        ESP_LOGI(TAG, "connecting to \"%s\"...", APP_WIFI_SSID);
 
-    const EventBits_t bits = xEventGroupWaitBits(s_events,
-                                                 WIFI_CONNECTED_BIT | WIFI_FAILED_BIT,
-                                                 pdFALSE, pdFALSE,
-                                                 pdMS_TO_TICKS(WIFI_TIMEOUT_MS));
-    if (!(bits & WIFI_CONNECTED_BIT)) {
-        ESP_LOGW(TAG, "WiFi connect failed, keep running on RTC");
+        if (esp_wifi_start() == ESP_OK) {
+            esp_wifi_connect();
+
+            const EventBits_t bits = xEventGroupWaitBits(s_events,
+                                                         WIFI_CONNECTED_BIT | WIFI_FAILED_BIT,
+                                                         pdFALSE, pdFALSE,
+                                                         pdMS_TO_TICKS(WIFI_TIMEOUT_MS));
+            if (bits & WIFI_CONNECTED_BIT) {
+                ESP_LOGI(TAG, "WiFi connected");
+                do_sntp();
+                weather_fetch();
+            } else {
+                ESP_LOGW(TAG, "WiFi connect failed, keep local time");
+            }
+        }
+
         s_shutting_down = true;
         esp_wifi_stop();
-        vTaskDelete(NULL);
-        return;
-    }
+        ESP_LOGI(TAG, "WiFi off, next refresh in %d min", WEATHER_REFRESH_MIN);
 
-    ESP_LOGI(TAG, "WiFi connected, waiting for SNTP...");
-
-    esp_sntp_config_t sntp_cfg = ESP_NETIF_SNTP_DEFAULT_CONFIG(APP_NTP_SERVER);
-    if (esp_netif_sntp_init(&sntp_cfg) == ESP_OK &&
-        esp_netif_sntp_sync_wait(pdMS_TO_TICKS(SNTP_TIMEOUT_MS)) == ESP_OK) {
-
-        setenv("TZ", APP_TZ, 1);
-        tzset();
-
-        const time_t epoch = time(NULL);
-        struct tm local;
-        localtime_r(&epoch, &local);
-
-        /* 表盘的软件时钟直接对准到校时结果 */
-        watch_set_time(epoch);
-
-        rtc_time_t t = {
-            .year = local.tm_year + 1900,
-            .month = local.tm_mon + 1,
-            .day = local.tm_mday,
-            .hour = local.tm_hour,
-            .minute = local.tm_min,
-            .second = local.tm_sec,
-        };
-
-        if (pcf85063_write(&t) == ESP_OK) {
-            ESP_LOGI(TAG, "RTC updated: %04d-%02d-%02d %02d:%02d:%02d",
-                     t.year, t.month, t.day, t.hour, t.minute, t.second);
-        } else {
-            ESP_LOGW(TAG, "RTC write failed");
+        /* 等下一个周期；期间若有人调用 net_request_refresh() 就立刻重来 */
+        if (xSemaphoreTake(s_refresh_req,
+                           pdMS_TO_TICKS((uint32_t)WEATHER_REFRESH_MIN * 60u * 1000u)) == pdTRUE) {
+            ESP_LOGI(TAG, "manual refresh requested");
         }
-    } else {
-        ESP_LOGW(TAG, "SNTP timeout, keep running on RTC");
     }
-
-    esp_netif_sntp_deinit();
-    s_shutting_down = true;
-    esp_wifi_stop();
-    ESP_LOGI(TAG, "WiFi off, sync task done");
-
-    vTaskDelete(NULL);
 }
 
 void time_sync_start(void)
 {
-    xTaskCreate(time_sync_task, "time_sync", 6144, NULL, 4, NULL);
+    xTaskCreate(net_task, "net", 6144, NULL, 4, NULL);
 }

@@ -21,3 +21,8 @@ esp_err_t board_i2c_init(void);
  * @brief 在总线上挂一个 7 位地址的设备。
  */
 esp_err_t board_i2c_add_device(uint8_t addr, uint32_t scl_hz, i2c_master_dev_handle_t *out);
+
+/**
+ * @brief 取总线句柄（供 esp_lcd_touch 等组件使用）。
+ */
+i2c_master_bus_handle_t board_i2c_handle(void);

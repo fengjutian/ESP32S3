@@ -74,11 +74,20 @@ bool touch_read(touch_point_t *pt)
     uint8_t count = 0;
     bool touched = false;
 
-    if (esp_lcd_touch_read_data(s_tp) == ESP_OK) {
+    const esp_err_t err = esp_lcd_touch_read_data(s_tp);
+    if (err == ESP_OK) {
         touched = esp_lcd_touch_get_coordinates(s_tp, &x, &y, NULL, &count, 1);
-    }
 
-    if (touched && count > 0) {
+        if (!touched || count == 0) {
+            /* 读成功且确实没有触点：这是真抬手，立即上报。
+             * 以前这里也走去抖，会把「单帧鬼触 + 2 帧去抖」补成一次
+             * 3 帧、约 40ms 的按下，手势层就会把它当成一次点按来切页。 */
+            s_release_cnt = 0;
+            s_last_pressed = false;
+            pt->pressed = false;
+            return false;
+        }
+
         s_release_cnt = 0;
         s_last_pressed = true;
         pt->x = (x < LCD_H_RES) ? x : (uint16_t)(LCD_H_RES - 1);
@@ -87,7 +96,7 @@ bool touch_read(touch_point_t *pt)
         return true;
     }
 
-    /* 抬手去抖：偶发读失败不当作抬手 */
+    /* 只有 I2C 读失败才用去抖，避免总线偶发错误被当成抬手 */
     if (s_last_pressed) {
         if (++s_release_cnt < RELEASE_DEBOUNCE) {
             pt->pressed = true;

@@ -216,12 +216,15 @@ typedef struct {
 } gesture_state_t;
 
 /* 鬼触过滤参数：
- *   - 按压至少持续 2 帧（约 40ms）才算数，单帧尖峰丢掉；
+ *   - 按压至少持续 3 帧（约 60ms）才算数，1~2 帧的尖峰丢掉；
  *   - 单帧坐标跳变超过 120px 视为噪声，不参与位移统计；
- *   - 手势之间至少间隔 250ms，避免一次抖动连切好几页。 */
-#define GHOST_MIN_SAMPLES   2
+ *   - 800ms 以内的按压才算点按，更久的按住不放不切页；
+ *   - 手势之间至少间隔 500ms，避免一次抖动连切好几页。 */
+#define GHOST_MIN_SAMPLES   3
+#define GHOST_MIN_HOLD_MS   50
+#define TAP_MAX_HOLD_MS     800
 #define GHOST_MAX_JUMP      120
-#define GESTURE_COOLDOWN_US 250000
+#define GESTURE_COOLDOWN_US 500000
 
 static gesture_t gesture_feed(gesture_state_t *st, bool pressed_now, uint16_t x, uint16_t y)
 {
@@ -271,8 +274,8 @@ static gesture_t gesture_feed(gesture_state_t *st, bool pressed_now, uint16_t x,
     const int ax = abs(st->max_dx);
     const int ay = abs(st->max_dy);
 
-    /* 太短 / 只有一帧：鬼触，丢掉 */
-    if (st->samples < GHOST_MIN_SAMPLES || held_ms < 30) {
+    /* 太短 / 帧数不够：鬼触，丢掉 */
+    if (st->samples < GHOST_MIN_SAMPLES || held_ms < GHOST_MIN_HOLD_MS) {
         st->max_dx = 0;
         st->max_dy = 0;
         return GESTURE_NONE;
@@ -280,6 +283,9 @@ static gesture_t gesture_feed(gesture_state_t *st, bool pressed_now, uint16_t x,
 
     if (held_ms > 1000) {
         result = GESTURE_LONG_PRESS;
+    } else if (held_ms > TAP_MAX_HOLD_MS) {
+        /* 按住 0.8~1 秒：既不算点按也不算长按，当作误触忽略 */
+        result = GESTURE_NONE;
     } else if (ax >= ay) {
         if (st->max_dx <= -SWIPE_THRESHOLD) {
             result = GESTURE_SWIPE_LEFT;
@@ -298,17 +304,21 @@ static gesture_t gesture_feed(gesture_state_t *st, bool pressed_now, uint16_t x,
         }
     }
 
-    st->max_dx = 0;
-    st->max_dy = 0;
-
     /* 冷却：刚处理完一个手势，短时间内不认新的 */
     if (result != GESTURE_NONE) {
         const int64_t now = esp_timer_get_time();
         if (now - last_gesture_us < GESTURE_COOLDOWN_US) {
-            return GESTURE_NONE;
+            result = GESTURE_NONE;
+        } else {
+            last_gesture_us = now;
+            ESP_LOGI(TAG, "gesture %d: samples=%u held=%dms dx=%d dy=%d from (%u,%u)",
+                     (int)result, (unsigned)st->samples, (int)held_ms,
+                     st->max_dx, st->max_dy, (unsigned)st->start_x, (unsigned)st->start_y);
         }
-        last_gesture_us = now;
     }
+
+    st->max_dx = 0;
+    st->max_dy = 0;
 
     return result;
 }
@@ -328,6 +338,7 @@ static void watch_task(void *arg)
     gesture_state_t touch = {0};
     int64_t last_input_us = esp_timer_get_time();
     bool dimmed = false;
+    bool wake_press = false;   /* 这次按压只是用来点亮屏幕，不参与手势 */
     uint32_t last_weather_seq = 0;
 
     rtc_time_t now;
@@ -421,7 +432,22 @@ static void watch_task(void *arg)
          * 抬手那一拍 touch_read 不写坐标，用未初始化的栈值会误判点按位置。 */
         static touch_point_t pt;
         const bool pressed_now = touch_read(&pt);
-        const gesture_t gesture = gesture_feed(&touch, pressed_now, pt.x, pt.y);
+
+        /* 熄屏后的第一下触摸只负责点亮屏幕。以前这一下同时会被当成点按，
+         * 每唤醒一次就切一页，最后常常停在语音页。 */
+        if (pressed_now && dimmed) {
+            dimmed = false;
+            display_set_backlight(100);
+            last_input_us = esp_timer_get_time();
+            wake_press = true;
+            ESP_LOGI(TAG, "backlight: on (wake, gesture ignored)");
+        }
+
+        gesture_t gesture = gesture_feed(&touch, pressed_now, pt.x, pt.y);
+        if (!pressed_now && wake_press) {
+            wake_press = false;
+            gesture = GESTURE_NONE;
+        }
 
         /* 贪吃蛇：方向键转向、棋盘内轻触暂停、滑动或长按切走 */
         if (ui_face == FACE_SNAKE) {
@@ -512,6 +538,11 @@ static void watch_task(void *arg)
                 break;
 
             case GESTURE_SWIPE_RIGHT:
+                /* 第一页（指针）右滑不再回绕到最后一页（语音），
+                 * 避免一划手就进大模型对话页；想进语音请从「步数」往左滑。 */
+                if (ui_face == FACE_ANALOG) {
+                    break;
+                }
                 ui_face = (face_t)((ui_face + FACE_COUNT - 1) % FACE_COUNT);
                 ESP_LOGI(TAG, "swipe right -> %s", ui_face_name[ui_face]);
                 face_render(ui_face, &now, true);
@@ -533,14 +564,9 @@ static void watch_task(void *arg)
 
         s_ai_last_face = ui_face;
 
-        /* 30 秒无操作 → 降亮度 */
+        /* 30 秒无操作 → 降亮度（点亮逻辑在上面，只负责唤醒） */
         if (pressed_now) {
             last_input_us = esp_timer_get_time();
-            if (dimmed) {
-                dimmed = false;
-                display_set_backlight(100);
-                ESP_LOGI(TAG, "backlight: on");
-            }
         } else if (!dimmed && (esp_timer_get_time() - last_input_us > IDLE_DIM_MS * 1000LL)) {
             dimmed = true;
             display_set_backlight(DIM_PERCENT);

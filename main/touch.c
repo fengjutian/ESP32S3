@@ -96,7 +96,8 @@ bool touch_read(touch_point_t *pt)
         return true;
     }
 
-    /* 只有 I2C 读失败才用去抖，避免总线偶发错误被当成抬手 */
+    /* 只有 I2C 读失败才用去抖，避免总线偶发错误被当成抬手。
+     * CST816S 空闲会自动休眠，这里读失败（NAK）是正常现象，不打印。 */
     if (s_last_pressed) {
         if (++s_release_cnt < RELEASE_DEBOUNCE) {
             pt->pressed = true;

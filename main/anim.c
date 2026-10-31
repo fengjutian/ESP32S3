@@ -27,6 +27,7 @@
 
 #include "esp_random.h"
 #include "esp_timer.h"
+#include "esp_log.h"
 
 #include "display.h"
 #include "imu.h"
@@ -44,9 +45,15 @@
 #define GRAVITY_GAIN   1500.0f  /* 1g 倾斜对应的加速度（px/s²） */
 #define GRAVITY_DEAD   0.12f    /* 小于这个就当平放，球不会慢慢漂向一边 */
 #define GRAVITY_LPF    0.30f    /* 低通，滤掉手抖 */
-#define GRAVITY_SIGN_X (-1.0f)  /* 传感器方向反了就把它改成 +1 */
-#define GRAVITY_SIGN_Y (-1.0f)
+#define GRAVITY_SIGN_X (1.0f)   /* 实测：本板 IMU 与屏幕差 180°，两轴都取正 */
+#define GRAVITY_SIGN_Y (1.0f)
 #define IMU_EVERY_N    2        /* 每 2 帧读一次 IMU（约 15Hz），省 I2C 带宽 */
+
+#define SHAKE_LIN_G    0.45f    /* 去掉重力后的线性加速度超过这个值算「摇」 */
+#define SHAKE_COOLDOWN_US 350000LL
+#define SHAKE_KICK     330.0f   /* 摇一摇给每个球的基础速度增量（px/s） */
+
+static const char *TAG = "anim";
 #define WALL_BOUNCE   1.0f      /* 撞外圈的能量保留：完全弹性，球永远不会停 */
 #define BALL_BOUNCE   1.0f      /* 球球碰撞：同样按完全弹性处理 */
 #define MIN_SPEED     60.0f     /* 兜底：速度低到快停住时补一脚 */
@@ -99,6 +106,9 @@ static ripple_t s_ripple[RIPPLE_MAX];
 static int s_ripple_budget;
 static float s_gx;               /* 屏幕系重力加速度（px/s²） */
 static float s_gy;
+static float s_bx, s_by = 0.0f, s_bz = 1.0f;   /* 重力基线，用于分离「摇」 */
+static int64_t s_last_shake_us;
+static int s_shake_hits;
 static int s_imu_skip;
 static bool s_paused;
 static int64_t s_last_us;
@@ -138,6 +148,8 @@ static float speed_of(const ball_t *b)
 
 /* 倾斜重力：平放时加速度基本只有 z 轴（a≈(0,0,1g)），x/y 分量落在死区内，
  * 等价于没有重力；倾斜手表时把 x/y 投影到屏幕，球就往低处滚。 */
+static void shake_check(float ax, float ay, float az);
+
 static void gravity_update(void)
 {
     if (s_imu_skip > 0) {
@@ -150,6 +162,8 @@ static void gravity_update(void)
     if (imu_read_accel(&ax, &ay, &az) != ESP_OK) {
         return;
     }
+
+    shake_check(ax, ay, az);
 
     ax *= GRAVITY_SIGN_X;
     ay *= GRAVITY_SIGN_Y;
@@ -375,6 +389,58 @@ static void ripple_spawn(int x, int y, uint16_t color)
     s_ripple_budget--;
 }
 
+/* 摇一摇：加速度减去慢速基线，剩下的线性加速度够大就认为在摇，
+ * 给所有球一个随机方向的冲量。 */
+static void shake_check(float ax, float ay, float az)
+{
+    const float dx = ax - s_bx;
+    const float dy = ay - s_by;
+    const float dz = az - s_bz;
+    const float lin = sqrtf(dx * dx + dy * dy + dz * dz);
+
+    /* 基线跟得很慢：持续的倾斜会被吸进基线，只有快速抖动才留下大残差 */
+    s_bx += dx * 0.08f;
+    s_by += dy * 0.08f;
+    s_bz += dz * 0.08f;
+
+    /* 连续两次采样都超标才算摇，单帧尖峰（比如敲一下表壳）不触发 */
+    if (lin >= SHAKE_LIN_G) {
+        if (s_shake_hits < 8) {
+            s_shake_hits++;
+        }
+    } else {
+        s_shake_hits = 0;
+    }
+    if (s_shake_hits < 2) {
+        return;
+    }
+
+    const int64_t now = esp_timer_get_time();
+    if (now - s_last_shake_us < SHAKE_COOLDOWN_US) {
+        return;
+    }
+    s_last_shake_us = now;
+    s_shake_hits = 0;
+
+    ESP_LOGI(TAG, "shake %.2fg", (double)lin);
+
+    /* 甩得越猛，冲量越大；每球方向随机，再补一圈涟漪当反馈 */
+    const float power = (lin > 1.2f) ? 1.6f : ((lin > 0.8f) ? 1.25f : 1.0f);
+
+    s_ripple_budget = RIPPLE_BUDGET + 2;
+
+    for (int i = 0; i < BALL_COUNT; i++) {
+        ball_t *b = &s_ball[i];
+        const float ang = frand(0.0f, 6.2831853f);
+        const float sp = SHAKE_KICK * power * frand(0.75f, 1.1f);
+        b->vx += cosf(ang) * sp;
+        b->vy += sinf(ang) * sp;
+        if (i < 4) {
+            ripple_spawn(b->ix, b->iy, shade(b->color, 45));
+        }
+    }
+}
+
 static void seed_balls(void)
 {
     for (int i = 0; i < BALL_COUNT; i++) {
@@ -572,6 +638,11 @@ void anim_start(void)
     s_ripple_budget = RIPPLE_BUDGET;
     s_gx = 0.0f;
     s_gy = 0.0f;
+    s_bx = 0.0f;
+    s_by = 0.0f;
+    s_bz = 1.0f;
+    s_last_shake_us = 0;
+    s_shake_hits = 0;
     s_imu_skip = 0;
     s_started = true;
     s_last_us = esp_timer_get_time();
@@ -608,8 +679,8 @@ void anim_poll(void)
     s_last_us = now;
     s_next_us = now + FRAME_US;
 
-    gravity_update();
     s_ripple_budget = RIPPLE_BUDGET;
+    gravity_update();
 
     for (int i = 0; i < BALL_COUNT; i++) {
         ball_t *b = &s_ball[i];

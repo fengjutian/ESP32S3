@@ -12,9 +12,20 @@
 
 /* 模拟倾斜：0 = 平放，1 = 向右下倾斜（y 轴出现 -0.35g 分量） */
 static int g_tilt;
+static int g_shake;
+static int g_shake_toggle;
 
 esp_err_t imu_read_accel(float *ax, float *ay, float *az)
 {
+    if (g_shake) {
+        /* 模拟抖腕：x 轴 ±1.6g 来回摆 */
+        g_shake_toggle ^= 1;
+        *ax = g_shake_toggle ? 1.6f : -1.6f;
+        *ay = 0.0f;
+        *az = 0.9f;
+        return ESP_OK;
+    }
+
     *ax = 0.0f;
     *ay = g_tilt ? -0.35f : 0.0f;
     *az = g_tilt ? 0.94f : 1.0f;
@@ -198,6 +209,13 @@ int main(int argc, char **argv)
         if (f == 400) {
             g_tilt = 1;
             printf("tilt ON at frame %d\n", f);
+        }
+        if (f == 600) {
+            g_shake = 1;
+            printf("SHAKE at frame %d\n", f);
+        }
+        if (f == 620) {
+            g_shake = 0;
         }
         if (f == 900) {
             g_tilt = 0;

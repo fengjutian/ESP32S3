@@ -356,6 +356,10 @@ static void watch_task(void *arg)
         bq27220_read(&ui_soc, &ui_mv);
     }
 
+    /* 开机先画一次当前表盘：以前要等第一次触摸才渲染，
+     * 屏幕会一直停在 watch_app_start() 写的「启动中...」。 */
+    s_force_redraw = true;
+
     for (;;) {
         if (wdt_ok) {
             esp_task_wdt_reset();

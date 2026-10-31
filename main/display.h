@@ -120,7 +120,7 @@ void display_frame_end(void);
  * 缓冲容量为 LCD_H_RES × LINE_CHUNK 个像素（LINE_CHUNK = 16）。
  * 用法：逐块填充后调用 display_band_push() 刷新到屏幕。
  */
-#define DISPLAY_BAND_LINES 16
+#define DISPLAY_BAND_LINES 64
 
 uint16_t *display_band_buffer(void);
 

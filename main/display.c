@@ -35,7 +35,7 @@
 static const char *TAG = "display";
 
 /* 每次 DMA 传输的行数 */
-#define LINE_CHUNK          16
+#define LINE_CHUNK          64
 #define FLUSH_TIMEOUT_MS    2000
 
 #define LCD_OPCODE_READ_CMD  (0x0B)

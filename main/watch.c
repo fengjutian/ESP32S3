@@ -18,6 +18,7 @@
 #include "esp_log.h"
 #include "esp_task_wdt.h"
 
+#include "anim.h"
 #include "bq27220.h"
 #include "display.h"
 #include "faces.h"
@@ -426,6 +427,9 @@ static void watch_task(void *arg)
         /* 贪吃蛇需要比 1Hz 更快的节拍 */
         if (ui_face == FACE_SNAKE) {
             snake_poll();
+        } else if (ui_face == FACE_ANIM) {
+            /* 弹球动画同样要自己的节拍（内部限到 ~30fps） */
+            anim_poll();
         }
 
         /* 触摸手势；pt 用 static 保存最后一次按下的坐标，
@@ -440,6 +444,7 @@ static void watch_task(void *arg)
             display_set_backlight(100);
             last_input_us = esp_timer_get_time();
             wake_press = true;
+            anim_set_paused(false);   /* 点亮后弹球动画继续跑 */
             ESP_LOGI(TAG, "backlight: on (wake, gesture ignored)");
         }
 
@@ -486,6 +491,17 @@ static void watch_task(void *arg)
 
             default:
                 break;
+            }
+        } else if (ui_face == FACE_ANIM) {
+            /* 弹球：轻触踢球；滑动或长按离开这一页（否则没地方退出） */
+            if (gesture == GESTURE_TAP) {
+                anim_kick(pt.x, pt.y);
+            } else if (gesture == GESTURE_SWIPE_LEFT || gesture == GESTURE_SWIPE_RIGHT ||
+                       gesture == GESTURE_SWIPE_UP || gesture == GESTURE_SWIPE_DOWN ||
+                       gesture == GESTURE_LONG_PRESS) {
+                ui_face = (face_t)((ui_face + 1) % FACE_COUNT);
+                ESP_LOGI(TAG, "leave anim -> %s", ui_face_name[ui_face]);
+                face_render(ui_face, &now, true);
             }
         } else if (ui_face == FACE_AI) {
             /* 进入 AI 表盘时手指可能还按着，别把它当成一次录音 */
@@ -570,6 +586,7 @@ static void watch_task(void *arg)
         } else if (!dimmed && (esp_timer_get_time() - last_input_us > IDLE_DIM_MS * 1000LL)) {
             dimmed = true;
             display_set_backlight(DIM_PERCENT);
+            anim_set_paused(true);    /* 变暗后停掉弹球动画的推屏，省电 */
             ESP_LOGI(TAG, "backlight: dimmed");
         }
 

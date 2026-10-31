@@ -16,6 +16,7 @@ idf_component_register(
          "ui.c"
          "faces.c"
          "snake.c"
+         "anim.c"
          "watch.c"
     PRIV_REQUIRES
          spi_flash

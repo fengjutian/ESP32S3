@@ -16,6 +16,7 @@
 
 #include "esp_timer.h"
 
+#include "anim.h"
 #include "app_config.h"
 #include "display.h"
 #include "pedometer.h"
@@ -613,6 +614,9 @@ void face_render(face_t face, const rtc_time_t *t, bool full)
         break;
     case FACE_SNAKE:
         snake_start();
+        break;
+    case FACE_ANIM:
+        anim_start();
         break;
     case FACE_STEPS:
         steps_render(t, true);

@@ -10,7 +10,7 @@
 #include <stdio.h>
 
 const char *const ui_face_name[FACE_COUNT] = {
-    "指针", "简约", "经典", "极简", "信息", "天气", "贪吃蛇", "步数", "语音",
+    "指针", "简约", "经典", "极简", "信息", "天气", "贪吃蛇", "弹球", "步数", "语音",
 };
 
 const char *const ui_week_cn[7] = {
